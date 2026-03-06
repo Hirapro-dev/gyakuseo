@@ -135,6 +135,25 @@ export const suggestAdvice = pgTable("suggest_advice", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// 検索結果テーブル（ネガティブ記事検出用）
+export const searchResults = pgTable("search_results", {
+  id: serial("id").primaryKey(),
+  keywordId: integer("keyword_id")
+    .references(() => keywords.id, { onDelete: "cascade" })
+    .notNull(),
+  position: integer("position").notNull(), // 検索順位
+  title: text("title").notNull(), // 記事タイトル
+  url: text("url").notNull(), // 記事URL
+  snippet: text("snippet"), // スニペット（説明文）
+  sentiment: text("sentiment", {
+    enum: ["negative", "neutral", "positive", "unclassified"],
+  })
+    .default("unclassified")
+    .notNull(), // AI判定結果
+  reason: text("reason"), // AI判定理由
+  checkedAt: timestamp("checked_at").defaultNow().notNull(),
+});
+
 // 投稿ログテーブル
 export const publishLogs = pgTable("publish_logs", {
   id: serial("id").primaryKey(),
@@ -158,6 +177,7 @@ export const keywordsRelations = relations(keywords, ({ many }) => ({
   ownedSiteKeywords: many(ownedSiteKeywords),
   suggestHistory: many(suggestHistory),
   suggestAdvice: many(suggestAdvice),
+  searchResults: many(searchResults),
 }));
 
 export const trackedUrlsRelations = relations(trackedUrls, ({ one, many }) => ({
@@ -227,6 +247,13 @@ export const suggestAdviceRelations = relations(suggestAdvice, ({ one }) => ({
   }),
 }));
 
+export const searchResultsRelations = relations(searchResults, ({ one }) => ({
+  keyword: one(keywords, {
+    fields: [searchResults.keywordId],
+    references: [keywords.id],
+  }),
+}));
+
 export const publishLogsRelations = relations(publishLogs, ({ one }) => ({
   article: one(articles, {
     fields: [publishLogs.articleId],
@@ -255,3 +282,5 @@ export type SuggestHistory = typeof suggestHistory.$inferSelect;
 export type NewSuggestHistory = typeof suggestHistory.$inferInsert;
 export type SuggestAdvice = typeof suggestAdvice.$inferSelect;
 export type NewSuggestAdvice = typeof suggestAdvice.$inferInsert;
+export type SearchResult = typeof searchResults.$inferSelect;
+export type NewSearchResult = typeof searchResults.$inferInsert;

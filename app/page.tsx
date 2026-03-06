@@ -4,34 +4,12 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { RankBadge } from "@/components/UrlStatusBadge";
 import { RankingChart } from "@/components/RankingChart";
-import type { Keyword, TrackedUrl, RankingHistory, PublishLog, Article } from "@/lib/schema";
+import type { Keyword, TrackedUrl, RankingHistory } from "@/lib/schema";
 
 // キーワードとURL情報を含む型
 interface KeywordWithUrls extends Keyword {
   trackedUrls: TrackedUrl[];
 }
-
-// 投稿ログ＋記事情報の型
-interface PublishLogWithArticle extends PublishLog {
-  article?: Article | null;
-}
-
-// プラットフォーム表示名
-const PLATFORM_NAMES: Record<string, string> = {
-  note: "note", ameblo: "アメブロ", linkedin: "LinkedIn",
-  x: "X", facebook: "Facebook", instagram: "Instagram", wordpress: "WordPress",
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  success: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-  pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
-  manual: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  success: "成功", failed: "失敗", pending: "待機中", manual: "手動",
-};
 
 // URLごとの最新順位情報
 interface UrlRankInfo {
@@ -50,7 +28,6 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [measuring, setMeasuring] = useState<number | null>(null);
   const [measuringAll, setMeasuringAll] = useState(false);
-  const [publishLogs, setPublishLogs] = useState<PublishLogWithArticle[]>([]);
 
   // データ取得
   const fetchData = useCallback(async () => {
@@ -71,15 +48,6 @@ export default function DashboardPage() {
         })
       );
       setRankingData(rankMap);
-
-      // 投稿ログ取得
-      try {
-        const logRes = await fetch("/api/publish-logs");
-        const logData: PublishLogWithArticle[] = await logRes.json();
-        setPublishLogs(Array.isArray(logData) ? logData : []);
-      } catch {
-        // 投稿ログ取得失敗は無視（メイン機能に影響しない）
-      }
     } catch (error) {
       console.error("データ取得エラー:", error);
     } finally {
@@ -179,42 +147,6 @@ export default function DashboardPage() {
           {measuringAll ? "計測中..." : "全キーワード一括計測"}
         </button>
       </div>
-
-      {/* 投稿ログタイムライン */}
-      {publishLogs.length > 0 && (
-        <div className="bg-white dark:bg-navy-900 rounded-xl border border-gray-200 dark:border-navy-700 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-navy-700 flex items-center justify-between">
-            <h2 className="text-sm font-bold">直近の投稿ログ</h2>
-            <Link href="/articles" className="text-xs text-accent-500 hover:text-accent-400">
-              記事管理へ →
-            </Link>
-          </div>
-          <div className="divide-y divide-gray-100 dark:divide-navy-800 max-h-64 overflow-y-auto">
-            {publishLogs.slice(0, 10).map((log) => (
-              <div key={log.id} className="px-6 py-2.5 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_COLORS[log.status] || ""}`}>
-                    {STATUS_LABELS[log.status] || log.status}
-                  </span>
-                  <span className="font-medium text-gray-700 dark:text-gray-300">
-                    {PLATFORM_NAMES[log.platform] || log.platform}
-                  </span>
-                  {log.article && (
-                    <span className="text-gray-400 truncate max-w-[200px]">
-                      {log.article.title}
-                    </span>
-                  )}
-                </div>
-                <span className="text-gray-400 whitespace-nowrap">
-                  {new Date(log.publishedAt).toLocaleString("ja-JP", {
-                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
-                  })}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* キーワードが未登録の場合 */}
       {keywords.length === 0 && (

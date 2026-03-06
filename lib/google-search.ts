@@ -20,6 +20,14 @@ export interface SearchResult {
   rank: number; // 1〜10: 検索順位、101: 圏外
 }
 
+// 全検索結果の型（ネガティブ記事検出用）
+export interface FullSearchResult {
+  position: number;
+  title: string;
+  url: string;
+  snippet: string;
+}
+
 /**
  * SerpAPIでGoogle検索結果を取得し、
  * 対象URLの順位を返す
@@ -86,6 +94,56 @@ export async function getSearchRankings(
   );
 
   return results;
+}
+
+/**
+ * SerpAPIでGoogle検索結果を取得し、
+ * 全件のタイトル・URL・スニペットを返す（ネガティブ記事検出用）
+ */
+export async function getAllSearchResults(
+  keyword: string,
+  num: number = 20
+): Promise<FullSearchResult[]> {
+  const apiKey = process.env.SERPAPI_KEY;
+
+  if (!apiKey) {
+    throw new Error("環境変数 SERPAPI_KEY が設定されていません");
+  }
+
+  const params = new URLSearchParams({
+    api_key: apiKey,
+    engine: "google",
+    q: keyword,
+    gl: "jp",
+    hl: "ja",
+    num: String(num),
+  });
+
+  const response = await fetch(
+    `https://serpapi.com/search.json?${params.toString()}`
+  );
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error(`SerpAPIエラー: ${response.status} - ${errorBody}`);
+    throw new Error(`SerpAPIエラー: ${response.status} - ${errorBody}`);
+  }
+
+  const data: SerpApiResponse = await response.json();
+
+  if (data.error) {
+    console.error(`SerpAPIエラー: ${data.error}`);
+    throw new Error(`SerpAPIエラー: ${data.error}`);
+  }
+
+  const organicResults = data.organic_results || [];
+
+  return organicResults.map((r) => ({
+    position: r.position,
+    title: r.title,
+    url: r.link,
+    snippet: r.snippet || "",
+  }));
 }
 
 /**
