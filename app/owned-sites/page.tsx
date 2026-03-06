@@ -43,8 +43,12 @@ export default function OwnedSitesPage() {
   const [formKeywordLinks, setFormKeywordLinks] = useState<KeywordLinkForm[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // パスワード表示切替
+  // パスワード表示切替（一覧テーブル用）
   const [visiblePasswords, setVisiblePasswords] = useState<Set<number>>(new Set());
+  // フォームのパスワード表示切替
+  const [formPasswordVisible, setFormPasswordVisible] = useState(false);
+  // コピー完了表示（"siteId-field"をキーとして一時的に保持）
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // データ取得
   const fetchData = useCallback(async () => {
@@ -134,6 +138,7 @@ export default function OwnedSitesPage() {
     setFormKeywordLinks([]);
     setEditingId(null);
     setShowForm(false);
+    setFormPasswordVisible(false);
   };
 
   // 編集モード開始
@@ -166,11 +171,13 @@ export default function OwnedSitesPage() {
     setFormKeywordLinks(formKeywordLinks.filter((_, i) => i !== index));
   };
 
-  // キーワードリンク更新
-  const updateKeywordLink = (index: number, field: keyof KeywordLinkForm, value: number | null) => {
-    const updated = [...formKeywordLinks];
-    updated[index] = { ...updated[index], [field]: value };
-    setFormKeywordLinks(updated);
+  // キーワードリンク更新（複数フィールドを同時に更新可能）
+  const updateKeywordLink = (index: number, updates: Partial<KeywordLinkForm>) => {
+    setFormKeywordLinks((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], ...updates };
+      return updated;
+    });
   };
 
   // 選択済みキーワードに対応するtrackedUrlsをフィルタ
@@ -228,6 +235,25 @@ export default function OwnedSitesPage() {
       }
     } catch (error) {
       console.error("削除エラー:", error);
+    }
+  };
+
+  // クリップボードにコピー
+  const handleCopy = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 1500);
+    } catch {
+      // フォールバック
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 1500);
     }
   };
 
@@ -340,9 +366,32 @@ export default function OwnedSitesPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   ログインパスワード
                 </label>
-                <input type="password" value={formData.loginPassword}
-                  onChange={(e) => setFormData({ ...formData, loginPassword: e.target.value })}
-                  placeholder="パスワード" className={inputClass} />
+                <div className="relative">
+                  <input
+                    type={formPasswordVisible ? "text" : "password"}
+                    value={formData.loginPassword}
+                    onChange={(e) => setFormData({ ...formData, loginPassword: e.target.value })}
+                    placeholder="パスワード"
+                    className={inputClass + " pr-10"}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setFormPasswordVisible(!formPasswordVisible)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                    title={formPasswordVisible ? "パスワードを隠す" : "パスワードを表示"}
+                  >
+                    {formPasswordVisible ? (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -370,8 +419,7 @@ export default function OwnedSitesPage() {
                       value={link.keywordId || ""}
                       onChange={(e) => {
                         const kwId = parseInt(e.target.value) || 0;
-                        updateKeywordLink(idx, "keywordId", kwId);
-                        updateKeywordLink(idx, "trackedUrlId", null);
+                        updateKeywordLink(idx, { keywordId: kwId, trackedUrlId: null });
                       }}
                       className="flex-1 px-3 py-2 border border-gray-300 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                     >
@@ -383,7 +431,7 @@ export default function OwnedSitesPage() {
                     <select
                       value={link.trackedUrlId || ""}
                       onChange={(e) =>
-                        updateKeywordLink(idx, "trackedUrlId", e.target.value ? parseInt(e.target.value) : null)
+                        updateKeywordLink(idx, { trackedUrlId: e.target.value ? parseInt(e.target.value) : null })
                       }
                       className="flex-1 px-3 py-2 border border-gray-300 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                     >
@@ -480,17 +528,40 @@ export default function OwnedSitesPage() {
                       )}
                     </td>
                     <td className="px-4 py-4">
-                      <div className="space-y-1">
-                        <div className="text-sm text-gray-900 dark:text-white">
-                          {site.loginId || <span className="text-xs text-gray-400">-</span>}
-                        </div>
+                      <div className="space-y-1.5">
+                        {/* ログインID */}
+                        {site.loginId ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm text-gray-900 dark:text-white font-mono">{site.loginId}</span>
+                            <button
+                              onClick={() => handleCopy(site.loginId!, `${site.id}-id`)}
+                              className="p-0.5 text-gray-400 hover:text-accent-400 transition-colors"
+                              title="IDをコピー"
+                            >
+                              {copiedKey === `${site.id}-id` ? (
+                                <svg className="w-3.5 h-3.5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                </svg>
+                              ) : (
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                        {/* パスワード */}
                         {site.loginPassword ? (
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1.5">
                             <span className="text-sm text-gray-900 dark:text-white font-mono">
                               {visiblePasswords.has(site.id) ? site.loginPassword : "••••••••"}
                             </span>
                             <button onClick={() => togglePasswordVisibility(site.id)}
-                              className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                              className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                              title={visiblePasswords.has(site.id) ? "パスワードを隠す" : "パスワードを表示"}
+                            >
                               {visiblePasswords.has(site.id) ? (
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
@@ -499,6 +570,21 @@ export default function OwnedSitesPage() {
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleCopy(site.loginPassword!, `${site.id}-pw`)}
+                              className="p-0.5 text-gray-400 hover:text-accent-400 transition-colors"
+                              title="パスワードをコピー"
+                            >
+                              {copiedKey === `${site.id}-pw` ? (
+                                <svg className="w-3.5 h-3.5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                </svg>
+                              ) : (
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
                                 </svg>
                               )}
                             </button>
