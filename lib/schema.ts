@@ -113,6 +113,28 @@ export const suggestHistory = pgTable("suggest_history", {
   checkedAt: timestamp("checked_at").defaultNow().notNull(),
 });
 
+// サジェスト対策アドバイステーブル
+export const suggestAdvice = pgTable("suggest_advice", {
+  id: serial("id").primaryKey(),
+  keywordId: integer("keyword_id")
+    .references(() => keywords.id, { onDelete: "cascade" })
+    .notNull(),
+  suggestText: text("suggest_text"), // 特定のサジェストに紐付く場合（nullなら全体向け）
+  advice: text("advice").notNull(), // 対策内容・施策メモ
+  status: text("status", {
+    enum: ["todo", "in_progress", "done"],
+  })
+    .default("todo")
+    .notNull(),
+  priority: text("priority", {
+    enum: ["high", "medium", "low"],
+  })
+    .default("medium")
+    .notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // 投稿ログテーブル
 export const publishLogs = pgTable("publish_logs", {
   id: serial("id").primaryKey(),
@@ -135,6 +157,7 @@ export const keywordsRelations = relations(keywords, ({ many }) => ({
   articles: many(articles),
   ownedSiteKeywords: many(ownedSiteKeywords),
   suggestHistory: many(suggestHistory),
+  suggestAdvice: many(suggestAdvice),
 }));
 
 export const trackedUrlsRelations = relations(trackedUrls, ({ one, many }) => ({
@@ -197,6 +220,13 @@ export const suggestHistoryRelations = relations(suggestHistory, ({ one }) => ({
   }),
 }));
 
+export const suggestAdviceRelations = relations(suggestAdvice, ({ one }) => ({
+  keyword: one(keywords, {
+    fields: [suggestAdvice.keywordId],
+    references: [keywords.id],
+  }),
+}));
+
 export const publishLogsRelations = relations(publishLogs, ({ one }) => ({
   article: one(articles, {
     fields: [publishLogs.articleId],
@@ -223,3 +253,5 @@ export type OwnedSiteKeyword = typeof ownedSiteKeywords.$inferSelect;
 export type NewOwnedSiteKeyword = typeof ownedSiteKeywords.$inferInsert;
 export type SuggestHistory = typeof suggestHistory.$inferSelect;
 export type NewSuggestHistory = typeof suggestHistory.$inferInsert;
+export type SuggestAdvice = typeof suggestAdvice.$inferSelect;
+export type NewSuggestAdvice = typeof suggestAdvice.$inferInsert;
