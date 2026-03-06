@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { ownedSites } from "@/lib/schema";
+import { ownedSites, ownedSiteKeywords } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 
-// 自社サイト一覧取得
+// 自社サイト一覧取得（中間テーブル経由でキーワード・trackedUrlも取得）
 export async function GET() {
   try {
     const sites = await db.query.ownedSites.findMany({
       orderBy: (ownedSites, { desc }) => [desc(ownedSites.createdAt)],
       with: {
-        trackedUrl: {
+        ownedSiteKeywords: {
           with: {
             keyword: true,
+            trackedUrl: true,
           },
         },
       },
@@ -28,10 +29,11 @@ export async function GET() {
 }
 
 // 自社サイト新規作成
+// keywordLinks: [{ keywordId, trackedUrlId? }]
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { serviceName, pageUrl, loginUrl, loginId, loginPassword, memo, trackedUrlId } = body;
+    const { serviceName, pageUrl, loginUrl, loginId, loginPassword, memo, keywordLinks } = body;
 
     if (!serviceName || !pageUrl) {
       return NextResponse.json(
@@ -40,6 +42,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // サイト本体を作成
     const newSite = await db
       .insert(ownedSites)
       .values({
@@ -49,9 +52,20 @@ export async function POST(request: NextRequest) {
         loginId: loginId?.trim() || null,
         loginPassword: loginPassword?.trim() || null,
         memo: memo?.trim() || null,
-        trackedUrlId: trackedUrlId || null,
       })
       .returning();
+
+    const siteId = newSite[0].id;
+
+    // キーワードリンクを作成
+    if (keywordLinks && keywordLinks.length > 0) {
+      const linkValues = keywordLinks.map((link: { keywordId: number; trackedUrlId?: number | null }) => ({
+        ownedSiteId: siteId,
+        keywordId: link.keywordId,
+        trackedUrlId: link.trackedUrlId || null,
+      }));
+      await db.insert(ownedSiteKeywords).values(linkValues);
+    }
 
     return NextResponse.json(newSite[0], { status: 201 });
   } catch (error) {
@@ -67,7 +81,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, serviceName, pageUrl, loginUrl, loginId, loginPassword, memo, trackedUrlId } = body;
+    const { id, serviceName, pageUrl, loginUrl, loginId, loginPassword, memo, keywordLinks } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -85,7 +99,6 @@ export async function PUT(request: NextRequest) {
         ...(loginId !== undefined && { loginId: loginId?.trim() || null }),
         ...(loginPassword !== undefined && { loginPassword: loginPassword?.trim() || null }),
         ...(memo !== undefined && { memo: memo?.trim() || null }),
-        ...(trackedUrlId !== undefined && { trackedUrlId: trackedUrlId || null }),
         updatedAt: new Date(),
       })
       .where(eq(ownedSites.id, id))
@@ -96,6 +109,20 @@ export async function PUT(request: NextRequest) {
         { error: "サイトが見つかりません" },
         { status: 404 }
       );
+    }
+
+    // キーワードリンクを再作成（全削除→再挿入）
+    if (keywordLinks !== undefined) {
+      await db.delete(ownedSiteKeywords).where(eq(ownedSiteKeywords.ownedSiteId, id));
+
+      if (keywordLinks.length > 0) {
+        const linkValues = keywordLinks.map((link: { keywordId: number; trackedUrlId?: number | null }) => ({
+          ownedSiteId: id,
+          keywordId: link.keywordId,
+          trackedUrlId: link.trackedUrlId || null,
+        }));
+        await db.insert(ownedSiteKeywords).values(linkValues);
+      }
     }
 
     return NextResponse.json(updated[0]);

@@ -1,11 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { keywords, trackedUrls, rankingHistory } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, gte } from "drizzle-orm";
 import { getSearchRankings } from "@/lib/google-search";
 
+// 本日の0時（JST）を取得
+function getTodayStartJST(): Date {
+  const now = new Date();
+  // JSTオフセット（+9時間）
+  const jstOffset = 9 * 60 * 60 * 1000;
+  const jstNow = new Date(now.getTime() + jstOffset);
+  const jstToday = new Date(jstNow.getFullYear(), jstNow.getMonth(), jstNow.getDate());
+  // UTCに戻す
+  return new Date(jstToday.getTime() - jstOffset);
+}
+
 // 手動計測エンドポイント
-// keywordId指定で特定キーワードのみ、指定なしで全キーワードを計測
+// 当日既に計測済みならキャッシュ（DB）から返す
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -14,12 +25,10 @@ export async function POST(request: NextRequest) {
     // 計測対象のキーワードを取得
     let targetKeywords;
     if (keywordId) {
-      // 特定のキーワードのみ
       targetKeywords = await db.query.keywords.findMany({
         where: eq(keywords.id, keywordId),
       });
     } else {
-      // 全アクティブキーワード
       targetKeywords = await db.query.keywords.findMany({
         where: eq(keywords.isActive, true),
       });
@@ -32,8 +41,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const todayStart = getTodayStartJST();
     let totalProcessed = 0;
-    const results: { keyword: string; urlCount: number; error?: string }[] = [];
+    let cachedCount = 0;
+    const results: { keyword: string; urlCount: number; cached: boolean; error?: string }[] = [];
 
     for (const kw of targetKeywords) {
       try {
@@ -43,15 +54,30 @@ export async function POST(request: NextRequest) {
         });
 
         if (urls.length === 0) {
-          results.push({ keyword: kw.keyword, urlCount: 0 });
+          results.push({ keyword: kw.keyword, urlCount: 0, cached: false });
           continue;
         }
 
-        // Google検索APIで順位取得
+        // 当日の計測データがあるかチェック
+        const todayHistory = await db.query.rankingHistory.findMany({
+          where: and(
+            eq(rankingHistory.keywordId, kw.id),
+            gte(rankingHistory.checkedAt, todayStart)
+          ),
+        });
+
+        if (todayHistory.length > 0) {
+          // 当日キャッシュあり → SerpAPI呼ばない
+          totalProcessed += todayHistory.length;
+          cachedCount += todayHistory.length;
+          results.push({ keyword: kw.keyword, urlCount: todayHistory.length, cached: true });
+          continue;
+        }
+
+        // キャッシュなし → SerpAPIで計測
         const targetUrls = urls.map((u) => u.url);
         const rankings = await getSearchRankings(kw.keyword, targetUrls);
 
-        // 結果をDBに保存
         const now = new Date();
         const insertData = rankings.map((r) => ({
           keywordId: kw.id,
@@ -63,16 +89,19 @@ export async function POST(request: NextRequest) {
         await db.insert(rankingHistory).values(insertData);
 
         totalProcessed += rankings.length;
-        results.push({ keyword: kw.keyword, urlCount: rankings.length });
+        results.push({ keyword: kw.keyword, urlCount: rankings.length, cached: false });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        results.push({ keyword: kw.keyword, urlCount: 0, error: errorMsg });
+        results.push({ keyword: kw.keyword, urlCount: 0, cached: false, error: errorMsg });
       }
     }
 
     return NextResponse.json({
-      message: "計測が完了しました",
+      message: cachedCount > 0
+        ? `計測完了（${cachedCount}件はキャッシュ利用）`
+        : "計測が完了しました",
       processed: totalProcessed,
+      cached: cachedCount,
       results,
     });
   } catch (error) {

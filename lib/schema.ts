@@ -79,11 +79,38 @@ export const ownedSites = pgTable("owned_sites", {
   loginId: text("login_id"), // ログインID
   loginPassword: text("login_password"), // ログインパスワード
   memo: text("memo"), // 詳細・メモ
-  trackedUrlId: integer("tracked_url_id").references(() => trackedUrls.id, {
-    onDelete: "set null",
-  }), // URL管理との連携ID
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// 自社サイト×キーワード中間テーブル（複数キーワード対応）
+export const ownedSiteKeywords = pgTable("owned_site_keywords", {
+  id: serial("id").primaryKey(),
+  ownedSiteId: integer("owned_site_id")
+    .references(() => ownedSites.id, { onDelete: "cascade" })
+    .notNull(),
+  keywordId: integer("keyword_id")
+    .references(() => keywords.id, { onDelete: "cascade" })
+    .notNull(),
+  trackedUrlId: integer("tracked_url_id").references(() => trackedUrls.id, {
+    onDelete: "set null",
+  }), // URL管理との連携ID（このキーワードでの順位取得用）
+});
+
+// サジェスト履歴テーブル
+export const suggestHistory = pgTable("suggest_history", {
+  id: serial("id").primaryKey(),
+  keywordId: integer("keyword_id")
+    .references(() => keywords.id, { onDelete: "cascade" })
+    .notNull(),
+  suggestText: text("suggest_text").notNull(),
+  position: integer("position").notNull(), // サジェスト内の表示順（0始まり）
+  sentiment: text("sentiment", {
+    enum: ["negative", "neutral", "positive", "unclassified"],
+  })
+    .default("unclassified")
+    .notNull(),
+  checkedAt: timestamp("checked_at").defaultNow().notNull(),
 });
 
 // 投稿ログテーブル
@@ -106,6 +133,8 @@ export const keywordsRelations = relations(keywords, ({ many }) => ({
   trackedUrls: many(trackedUrls),
   rankingHistory: many(rankingHistory),
   articles: many(articles),
+  ownedSiteKeywords: many(ownedSiteKeywords),
+  suggestHistory: many(suggestHistory),
 }));
 
 export const trackedUrlsRelations = relations(trackedUrls, ({ one, many }) => ({
@@ -113,7 +142,7 @@ export const trackedUrlsRelations = relations(trackedUrls, ({ one, many }) => ({
     fields: [trackedUrls.keywordId],
     references: [keywords.id],
   }),
-  ownedSites: many(ownedSites),
+  ownedSiteKeywords: many(ownedSiteKeywords),
 }));
 
 export const rankingHistoryRelations = relations(rankingHistory, ({ one }) => ({
@@ -142,10 +171,29 @@ export const rewrittenArticlesRelations = relations(
   })
 );
 
-export const ownedSitesRelations = relations(ownedSites, ({ one }) => ({
+export const ownedSitesRelations = relations(ownedSites, ({ many }) => ({
+  ownedSiteKeywords: many(ownedSiteKeywords),
+}));
+
+export const ownedSiteKeywordsRelations = relations(ownedSiteKeywords, ({ one }) => ({
+  ownedSite: one(ownedSites, {
+    fields: [ownedSiteKeywords.ownedSiteId],
+    references: [ownedSites.id],
+  }),
+  keyword: one(keywords, {
+    fields: [ownedSiteKeywords.keywordId],
+    references: [keywords.id],
+  }),
   trackedUrl: one(trackedUrls, {
-    fields: [ownedSites.trackedUrlId],
+    fields: [ownedSiteKeywords.trackedUrlId],
     references: [trackedUrls.id],
+  }),
+}));
+
+export const suggestHistoryRelations = relations(suggestHistory, ({ one }) => ({
+  keyword: one(keywords, {
+    fields: [suggestHistory.keywordId],
+    references: [keywords.id],
   }),
 }));
 
@@ -171,3 +219,7 @@ export type PublishLog = typeof publishLogs.$inferSelect;
 export type NewPublishLog = typeof publishLogs.$inferInsert;
 export type OwnedSite = typeof ownedSites.$inferSelect;
 export type NewOwnedSite = typeof ownedSites.$inferInsert;
+export type OwnedSiteKeyword = typeof ownedSiteKeywords.$inferSelect;
+export type NewOwnedSiteKeyword = typeof ownedSiteKeywords.$inferInsert;
+export type SuggestHistory = typeof suggestHistory.$inferSelect;
+export type NewSuggestHistory = typeof suggestHistory.$inferInsert;
