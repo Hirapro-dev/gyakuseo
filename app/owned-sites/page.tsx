@@ -53,6 +53,8 @@ export default function OwnedSitesPage() {
   const [formPasswordVisible, setFormPasswordVisible] = useState(false);
   // コピー完了表示
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // ドメイン内複数記事の展開状態（キー: "siteId-keywordId"）
+  const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
 
   // データ取得
   const fetchData = useCallback(async () => {
@@ -112,6 +114,63 @@ export default function OwnedSitesPage() {
       );
 
     return history[0]?.rank ?? null;
+  };
+
+  // URLからドメインを抽出
+  const getDomain = (url: string): string => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      return url;
+    }
+  };
+
+  // 特定キーワードで同一ドメインの全ランクイン記事を取得
+  const getDomainArticlesForKeyword = useCallback(
+    (sitePageUrl: string, keywordId: number): { url: string; rank: number; title?: string }[] => {
+      const siteDomain = getDomain(sitePageUrl);
+
+      // このキーワードの最新の順位データを取得（URL単位で最新1件ずつ）
+      const latestByUrl = new Map<string, RankingHistory>();
+      rankingData
+        .filter((h) => h.keywordId === keywordId)
+        .forEach((h) => {
+          const existing = latestByUrl.get(h.url);
+          if (!existing || new Date(h.checkedAt).getTime() > new Date(existing.checkedAt).getTime()) {
+            latestByUrl.set(h.url, h);
+          }
+        });
+
+      // 同一ドメインのURLをフィルタ
+      const articles: { url: string; rank: number; title?: string }[] = [];
+      latestByUrl.forEach((h, url) => {
+        if (getDomain(url) === siteDomain && h.rank <= 100) {
+          // trackedUrlsからラベルを取得
+          const tracked = trackedUrls.find((u) => u.url === url && u.keywordId === keywordId);
+          articles.push({
+            url,
+            rank: h.rank,
+            title: tracked?.label || undefined,
+          });
+        }
+      });
+
+      // 順位順にソート
+      articles.sort((a, b) => a.rank - b.rank);
+      return articles;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rankingData, trackedUrls]
+  );
+
+  // ドメイン展開の切替
+  const toggleDomainExpand = (key: string) => {
+    setExpandedDomains((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
   // フォームリセット
@@ -292,18 +351,29 @@ export default function OwnedSitesPage() {
     </button>
   );
 
-  // サイトの最良順位を取得（全キーワード中の最小ランク）
+  // サイトの最良順位を取得（全キーワード中の最小ランク、複数記事対応）
   const getBestRankForSite = useCallback(
     (site: OwnedSiteWithRelation): number | null => {
       if (site.ownedSiteKeywords.length === 0) return null;
-      const ranks = site.ownedSiteKeywords
-        .map((osk) => getRankForLink(osk))
-        .filter((r): r is number => r !== null);
-      if (ranks.length === 0) return null;
-      return Math.min(...ranks);
+      const allRanks: number[] = [];
+
+      site.ownedSiteKeywords.forEach((osk) => {
+        // ドメイン内の全記事の順位を取得
+        const articles = getDomainArticlesForKeyword(site.pageUrl, osk.keywordId);
+        if (articles.length > 0) {
+          articles.forEach((a) => allRanks.push(a.rank));
+        } else {
+          // ドメイン記事が見つからなければ従来のtrackedUrl経由の順位
+          const rank = getRankForLink(osk);
+          if (rank !== null) allRanks.push(rank);
+        }
+      });
+
+      if (allRanks.length === 0) return null;
+      return Math.min(...allRanks);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [trackedUrls, rankingData]
+    [trackedUrls, rankingData, getDomainArticlesForKeyword]
   );
 
   // フィルター+ソート適用
@@ -676,27 +746,68 @@ export default function OwnedSitesPage() {
                   </a>
                 </div>
 
-                {/* キーワード × 順位 一覧（横並び） */}
+                {/* キーワード × 順位 一覧（横並び + 複数記事対応） */}
                 {site.ownedSiteKeywords.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {site.ownedSiteKeywords.map((osk) => {
-                      const rank = getRankForLink(osk);
-                      const kwName = osk.keyword?.keyword || `KW#${osk.keywordId}`;
-                      return (
-                        <div
-                          key={osk.id}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 dark:bg-navy-950 border border-gray-200 dark:border-navy-700"
-                        >
-                          <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                          </svg>
-                          <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
-                            {kwName}
-                          </span>
-                          <RankBadge rank={rank} />
-                        </div>
-                      );
-                    })}
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      {site.ownedSiteKeywords.map((osk) => {
+                        const kwName = osk.keyword?.keyword || `KW#${osk.keywordId}`;
+                        const domainArticles = getDomainArticlesForKeyword(site.pageUrl, osk.keywordId);
+                        const hasMultiple = domainArticles.length > 1;
+                        const expandKey = `${site.id}-${osk.keywordId}`;
+                        const isExpanded = expandedDomains.has(expandKey);
+
+                        // 最高位を取得（複数記事がある場合はその中の最高位）
+                        const bestRank = domainArticles.length > 0
+                          ? Math.min(...domainArticles.map((a) => a.rank))
+                          : getRankForLink(osk);
+
+                        return (
+                          <div key={osk.id} className="flex flex-col">
+                            <div
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-50 dark:bg-navy-950 border border-gray-200 dark:border-navy-700 ${hasMultiple ? "cursor-pointer hover:bg-gray-100 dark:hover:bg-navy-900 transition-colors" : ""}`}
+                              onClick={() => hasMultiple && toggleDomainExpand(expandKey)}
+                            >
+                              <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                              </svg>
+                              <span className="text-sm font-medium text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                                {kwName}
+                              </span>
+                              {hasMultiple && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 whitespace-nowrap">
+                                  複数あり({domainArticles.length})
+                                  <svg className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                  </svg>
+                                </span>
+                              )}
+                              <RankBadge rank={bestRank} />
+                            </div>
+
+                            {/* 展開: 同一ドメインの記事一覧 */}
+                            {hasMultiple && isExpanded && (
+                              <div className="mt-1 ml-2 space-y-1 border-l-2 border-purple-300 dark:border-purple-700 pl-3">
+                                {domainArticles.map((article, idx) => (
+                                  <div key={idx} className="flex items-center gap-2 text-xs py-1">
+                                    <RankBadge rank={article.rank} />
+                                    <a
+                                      href={article.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-500 dark:text-blue-400 hover:underline truncate max-w-[400px]"
+                                      title={article.url}
+                                    >
+                                      {article.title || article.url}
+                                    </a>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 ) : (
                   <span className="text-xs text-gray-400">キーワード未設定</span>
