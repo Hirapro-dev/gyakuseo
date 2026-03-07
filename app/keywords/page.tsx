@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { KeywordTable } from "@/components/KeywordTable";
 import type { Keyword } from "@/lib/schema";
 
@@ -10,6 +10,12 @@ export default function KeywordsPage() {
   const [newKeyword, setNewKeyword] = useState("");
   const [newMemo, setNewMemo] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // フィルター・ソート状態
+  const [searchText, setSearchText] = useState("");
+  const [activeFilter, setActiveFilter] = useState<"all" | "on" | "off">("all");
+  const [sortKey, setSortKey] = useState<"createdAt" | "keyword">("createdAt");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // キーワード一覧取得
   const fetchKeywords = useCallback(async () => {
@@ -27,6 +33,39 @@ export default function KeywordsPage() {
   useEffect(() => {
     fetchKeywords();
   }, [fetchKeywords]);
+
+  // フィルター+ソート適用
+  const filteredKeywords = useMemo(() => {
+    let result = keywords;
+
+    // テキスト検索
+    if (searchText) {
+      const q = searchText.toLowerCase();
+      result = result.filter(
+        (kw) =>
+          kw.keyword.toLowerCase().includes(q) ||
+          (kw.memo && kw.memo.toLowerCase().includes(q))
+      );
+    }
+
+    // 監視状態フィルター
+    if (activeFilter === "on") result = result.filter((kw) => kw.isActive);
+    if (activeFilter === "off") result = result.filter((kw) => !kw.isActive);
+
+    // ソート
+    return [...result].sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "keyword":
+          cmp = a.keyword.localeCompare(b.keyword, "ja");
+          break;
+        case "createdAt":
+          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [keywords, searchText, activeFilter, sortKey, sortDir]);
 
   // キーワード追加
   const handleAdd = async (e: React.FormEvent) => {
@@ -88,10 +127,7 @@ export default function KeywordsPage() {
     }
 
     try {
-      const res = await fetch(`/api/keywords?id=${id}`, {
-        method: "DELETE",
-      });
-
+      const res = await fetch(`/api/keywords?id=${id}`, { method: "DELETE" });
       if (res.ok) {
         await fetchKeywords();
       } else {
@@ -102,6 +138,9 @@ export default function KeywordsPage() {
       console.error("キーワード削除エラー:", error);
     }
   };
+
+  const selectClass =
+    "px-3 py-2 border border-gray-300 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-accent-500";
 
   if (loading) {
     return (
@@ -152,13 +191,48 @@ export default function KeywordsPage() {
 
       {/* キーワード一覧テーブル */}
       <div className="bg-white dark:bg-navy-900 rounded-xl border border-gray-200 dark:border-navy-700 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-navy-700">
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-navy-700 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <h2 className="text-lg font-bold">
-            登録済みキーワード ({keywords.length}件)
+            登録済みキーワード ({filteredKeywords.length}件)
           </h2>
+
+          {/* フィルター・ソートバー */}
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="検索..."
+              className="w-36 px-3 py-2 border border-gray-300 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-500"
+            />
+            <select
+              value={activeFilter}
+              onChange={(e) => setActiveFilter(e.target.value as "all" | "on" | "off")}
+              className={selectClass}
+            >
+              <option value="all">全て</option>
+              <option value="on">ONのみ</option>
+              <option value="off">OFFのみ</option>
+            </select>
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as "createdAt" | "keyword")}
+              className={selectClass}
+            >
+              <option value="createdAt">作成日順</option>
+              <option value="keyword">名前順</option>
+            </select>
+            <button
+              onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")}
+              className="px-3 py-2 border border-gray-300 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm hover:bg-gray-50 dark:hover:bg-navy-800 transition-colors"
+              title={sortDir === "asc" ? "昇順" : "降順"}
+            >
+              {sortDir === "asc" ? "▲" : "▼"}
+            </button>
+          </div>
         </div>
         <KeywordTable
-          keywords={keywords}
+          keywords={filteredKeywords}
           onUpdate={handleUpdate}
           onDelete={handleDelete}
         />

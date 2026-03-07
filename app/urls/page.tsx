@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { UrlTypeBadge, RankBadge, RankChange } from "@/components/UrlStatusBadge";
 import type { Keyword, TrackedUrl, RankingHistory } from "@/lib/schema";
 
@@ -72,8 +72,10 @@ export default function UrlsPage() {
   const [measuring, setMeasuring] = useState(false);
   const [measureResult, setMeasureResult] = useState<string | null>(null);
 
-  // フィルター
+  // フィルター・ソート
   const [filterKeywordId, setFilterKeywordId] = useState<number | "all">("all");
+  const [sortKey, setSortKey] = useState<"id" | "rank" | "keyword">("id");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   // データ取得
   const fetchData = useCallback(async () => {
@@ -237,12 +239,50 @@ export default function UrlsPage() {
     return filterKeywordId === "all" || u.keywordId === filterKeywordId;
   });
 
-  // カテゴリ別にURLを分類
-  const categorizedUrls: Record<UrlType, TrackedUrlWithKeyword[]> = {
-    negative: filteredUrls.filter((u) => u.type === "negative"),
-    positive: filteredUrls.filter((u) => u.type === "positive"),
-    neutral: filteredUrls.filter((u) => u.type === "neutral"),
-  };
+  // ソート関数
+  const sortUrls = useCallback(
+    (urlList: TrackedUrlWithKeyword[]) => {
+      return [...urlList].sort((a, b) => {
+        let cmp = 0;
+        switch (sortKey) {
+          case "id":
+            cmp = a.id - b.id;
+            break;
+          case "rank": {
+            const ra = getUrlRank(a.url, a.keywordId).latest ?? 999;
+            const rb = getUrlRank(b.url, b.keywordId).latest ?? 999;
+            cmp = ra - rb;
+            break;
+          }
+          case "keyword": {
+            const ka =
+              a.keyword?.keyword ||
+              keywords.find((k) => k.id === a.keywordId)?.keyword ||
+              "";
+            const kb =
+              b.keyword?.keyword ||
+              keywords.find((k) => k.id === b.keywordId)?.keyword ||
+              "";
+            cmp = ka.localeCompare(kb, "ja");
+            break;
+          }
+        }
+        return sortDir === "asc" ? cmp : -cmp;
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sortKey, sortDir, rankingData, keywords]
+  );
+
+  // カテゴリ別にURLを分類+ソート
+  const categorizedUrls: Record<UrlType, TrackedUrlWithKeyword[]> = useMemo(
+    () => ({
+      negative: sortUrls(filteredUrls.filter((u) => u.type === "negative")),
+      positive: sortUrls(filteredUrls.filter((u) => u.type === "positive")),
+      neutral: sortUrls(filteredUrls.filter((u) => u.type === "neutral")),
+    }),
+    [filteredUrls, sortUrls]
+  );
 
   if (loading) {
     return (
@@ -350,7 +390,7 @@ export default function UrlsPage() {
                     </td>
                     <td className="px-6 py-4 text-center">
                       {rank.latest !== null ? (
-                        <RankBadge rank={rank.latest} />
+                        <RankBadge rank={rank.latest} urlType={type} />
                       ) : (
                         <span className="text-xs text-gray-400">未計測</span>
                       )}
@@ -399,7 +439,7 @@ export default function UrlsPage() {
             キーワードに対するURL（ネガティブ・ポジティブ・ニュートラル）を管理
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           {/* キーワードフィルター */}
           <select
             value={filterKeywordId === "all" ? "all" : filterKeywordId}
@@ -417,6 +457,24 @@ export default function UrlsPage() {
               </option>
             ))}
           </select>
+          {/* ソート基準 */}
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as "id" | "rank" | "keyword")}
+            className="px-3 py-2 border border-gray-300 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+          >
+            <option value="id">ID順</option>
+            <option value="rank">順位順</option>
+            <option value="keyword">キーワード順</option>
+          </select>
+          {/* ソート方向 */}
+          <button
+            onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")}
+            className="px-3 py-2 border border-gray-300 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm hover:bg-gray-50 dark:hover:bg-navy-800 transition-colors"
+            title={sortDir === "asc" ? "昇順" : "降順"}
+          >
+            {sortDir === "asc" ? "▲" : "▼"}
+          </button>
           <button
             onClick={handleMeasure}
             disabled={measuring || urls.length === 0}

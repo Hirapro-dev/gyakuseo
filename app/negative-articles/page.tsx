@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
 // 型定義
 interface Keyword {
@@ -52,7 +52,9 @@ export default function NegativeArticlesPage() {
     const jstNow = new Date(now.getTime() + jstOffset);
     return `${jstNow.getFullYear()}-${String(jstNow.getMonth() + 1).padStart(2, "0")}-${String(jstNow.getDate()).padStart(2, "0")}`;
   });
-  const [filterMode, setFilterMode] = useState<"all" | "negative">("all");
+  const [filterMode, setFilterMode] = useState<"all" | "negative" | "neutral" | "positive" | "unclassified">("all");
+  const [sortKey, setSortKey] = useState<"position" | "sentiment">("position");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [message, setMessage] = useState<string | null>(null);
   const [trackedUrls, setTrackedUrls] = useState<TrackedUrl[]>([]);
   const [registeringUrl, setRegisteringUrl] = useState<number | null>(null); // 登録中のsearchResult ID
@@ -89,7 +91,7 @@ export default function NegativeArticlesPage() {
     fetchTrackedUrls();
   }, [fetchTrackedUrls]);
 
-  // 検索結果取得
+  // 検索結果取得（常に全件取得し、フィルターはフロントで適用）
   const fetchResults = useCallback(async () => {
     if (!selectedKeywordId) return;
     setLoading(true);
@@ -98,9 +100,6 @@ export default function NegativeArticlesPage() {
         keywordId: String(selectedKeywordId),
         date: selectedDate,
       });
-      if (filterMode === "negative") {
-        params.set("onlyNegative", "true");
-      }
       const res = await fetch(`/api/negative-articles?${params.toString()}`);
       const data = await res.json();
       setSearchResultItems(Array.isArray(data) ? data : []);
@@ -110,7 +109,7 @@ export default function NegativeArticlesPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedKeywordId, selectedDate, filterMode]);
+  }, [selectedKeywordId, selectedDate]);
 
   // キーワード・日付・フィルター変更時にデータ取得
   useEffect(() => {
@@ -273,7 +272,38 @@ export default function NegativeArticlesPage() {
     setSelectedDate(`${y}-${m}-${d}`);
   };
 
-  // 統計計算
+  // フィルター+ソート適用
+  const filteredItems = useMemo(() => {
+    // センチメントの優先度マップ（ソート用）
+    const sentimentOrder: Record<string, number> = {
+      negative: 0,
+      neutral: 1,
+      positive: 2,
+      unclassified: 3,
+    };
+    let result = searchResultItems;
+
+    // センチメントフィルター
+    if (filterMode !== "all") {
+      result = result.filter((r) => r.sentiment === filterMode);
+    }
+
+    // ソート
+    return [...result].sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "position":
+          cmp = a.position - b.position;
+          break;
+        case "sentiment":
+          cmp = (sentimentOrder[a.sentiment] ?? 99) - (sentimentOrder[b.sentiment] ?? 99);
+          break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [searchResultItems, filterMode, sortKey, sortDir]);
+
+  // 統計計算（全件ベース）
   const stats = {
     total: searchResultItems.length,
     negative: searchResultItems.filter((r) => r.sentiment === "negative").length,
@@ -430,51 +460,84 @@ export default function NegativeArticlesPage() {
             <p className="text-2xl font-bold text-white">{stats.total}</p>
             <p className="text-xs text-gray-400 mt-1">検索結果数</p>
           </div>
-          <div
-            className={`bg-navy-800 rounded-xl border p-4 text-center cursor-pointer transition-all ${
-              filterMode === "negative"
-                ? "border-red-500 ring-1 ring-red-500"
-                : "border-navy-700 hover:border-red-500/50"
-            }`}
-            onClick={() =>
-              setFilterMode(filterMode === "negative" ? "all" : "negative")
-            }
-          >
-            <p className="text-2xl font-bold text-red-400">{stats.negative}</p>
-            <p className="text-xs text-gray-400 mt-1">ネガティブ</p>
-          </div>
-          <div className="bg-navy-800 rounded-xl border border-navy-700 p-4 text-center">
-            <p className="text-2xl font-bold text-blue-400">{stats.neutral}</p>
-            <p className="text-xs text-gray-400 mt-1">ニュートラル</p>
-          </div>
-          <div className="bg-navy-800 rounded-xl border border-navy-700 p-4 text-center">
-            <p className="text-2xl font-bold text-green-400">{stats.positive}</p>
-            <p className="text-xs text-gray-400 mt-1">ポジティブ</p>
-          </div>
+          {(["negative", "neutral", "positive"] as const).map((s) => {
+            const colorMap = {
+              negative: { text: "text-red-400", border: "border-red-500", ring: "ring-red-500", hover: "hover:border-red-500/50" },
+              neutral: { text: "text-blue-400", border: "border-blue-500", ring: "ring-blue-500", hover: "hover:border-blue-500/50" },
+              positive: { text: "text-green-400", border: "border-green-500", ring: "ring-green-500", hover: "hover:border-green-500/50" },
+            };
+            const labelMap = { negative: "ネガティブ", neutral: "ニュートラル", positive: "ポジティブ" };
+            const c = colorMap[s];
+            return (
+              <div
+                key={s}
+                className={`bg-navy-800 rounded-xl border p-4 text-center cursor-pointer transition-all ${
+                  filterMode === s
+                    ? `${c.border} ring-1 ${c.ring}`
+                    : `border-navy-700 ${c.hover}`
+                }`}
+                onClick={() => setFilterMode(filterMode === s ? "all" : s)}
+              >
+                <p className={`text-2xl font-bold ${c.text}`}>{stats[s]}</p>
+                <p className="text-xs text-gray-400 mt-1">{labelMap[s]}</p>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* フィルター切替 */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => setFilterMode("all")}
-          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-            filterMode === "all"
-              ? "bg-accent-500 text-navy-900"
-              : "bg-navy-800 text-gray-400 hover:text-white border border-navy-700"
-          }`}
+      {/* フィルター・ソートバー */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* センチメントフィルター */}
+        {(["all", "negative", "neutral", "positive", "unclassified"] as const).map((mode) => {
+          const labelMap: Record<string, string> = {
+            all: "全件",
+            negative: "ネガティブ",
+            neutral: "ニュートラル",
+            positive: "ポジティブ",
+            unclassified: "未分類",
+          };
+          const activeColorMap: Record<string, string> = {
+            all: "bg-accent-500 text-navy-900",
+            negative: "bg-red-600 text-white",
+            neutral: "bg-blue-600 text-white",
+            positive: "bg-green-600 text-white",
+            unclassified: "bg-gray-600 text-white",
+          };
+          return (
+            <button
+              key={mode}
+              onClick={() => setFilterMode(mode)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                filterMode === mode
+                  ? activeColorMap[mode]
+                  : "bg-navy-800 text-gray-400 hover:text-white border border-navy-700"
+              }`}
+            >
+              {labelMap[mode]}
+              {mode !== "all" && ` (${stats[mode as keyof typeof stats]})`}
+            </button>
+          );
+        })}
+
+        {/* 区切り線 */}
+        <div className="w-px h-6 bg-navy-700 mx-1" />
+
+        {/* ソート */}
+        <select
+          value={sortKey}
+          onChange={(e) => setSortKey(e.target.value as "position" | "sentiment")}
+          className="px-3 py-1.5 bg-navy-800 border border-navy-700 rounded-lg text-gray-300 text-xs focus:ring-2 focus:ring-accent-500 focus:border-transparent"
         >
-          全件表示
-        </button>
+          <option value="position">順位順</option>
+          <option value="sentiment">判定順</option>
+        </select>
         <button
-          onClick={() => setFilterMode("negative")}
-          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-            filterMode === "negative"
-              ? "bg-red-600 text-white"
-              : "bg-navy-800 text-gray-400 hover:text-white border border-navy-700"
-          }`}
+          onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")}
+          className="px-3 py-1.5 bg-navy-800 border border-navy-700 rounded-lg text-gray-300 text-xs hover:bg-navy-700 transition-colors"
+          title={sortDir === "asc" ? "昇順" : "降順"}
         >
-          ネガティブのみ
+          {sortDir === "asc" ? "▲" : "▼"}
         </button>
       </div>
 
@@ -488,7 +551,7 @@ export default function NegativeArticlesPage() {
             </svg>
             <span className="ml-2 text-gray-400 text-sm">読み込み中...</span>
           </div>
-        ) : searchResultItems.length === 0 ? (
+        ) : filteredItems.length === 0 ? (
           <div className="text-center py-16">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor" className="w-12 h-12 mx-auto text-gray-600 mb-3">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
@@ -523,7 +586,7 @@ export default function NegativeArticlesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-navy-700">
-                {searchResultItems.map((item) => {
+                {filteredItems.map((item) => {
                   const config = SENTIMENT_CONFIG[item.sentiment];
                   return (
                     <tr

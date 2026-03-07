@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { Keyword, SuggestHistory, SuggestAdvice } from "@/lib/schema";
 
 // sentiment表示設定
@@ -55,6 +55,15 @@ export default function SuggestsPage() {
   const [editingAdviceId, setEditingAdviceId] = useState<number | null>(null);
   const [submittingAdvice, setSubmittingAdvice] = useState(false);
   const [generatingAI, setGeneratingAI] = useState(false);
+
+  // サジェスト一覧フィルター
+  const [suggestSentimentFilter, setSuggestSentimentFilter] = useState<"all" | "negative" | "neutral" | "positive" | "unclassified">("all");
+
+  // 対策アドバイスフィルター・ソート
+  const [adviceStatusFilter, setAdviceStatusFilter] = useState<"all" | "todo" | "in_progress" | "done">("all");
+  const [advicePriorityFilter, setAdvicePriorityFilter] = useState<"all" | "high" | "medium" | "low">("all");
+  const [adviceSortKey, setAdviceSortKey] = useState<"createdAt" | "priority" | "status">("createdAt");
+  const [adviceSortDir, setAdviceSortDir] = useState<"asc" | "desc">("desc");
 
   // キーワード一覧取得
   const fetchKeywords = useCallback(async () => {
@@ -329,6 +338,47 @@ export default function SuggestsPage() {
     }
   };
 
+  // サジェスト一覧フィルター適用
+  const filteredSuggests = useMemo(() => {
+    if (suggestSentimentFilter === "all") return suggests;
+    return suggests.filter((s) => s.sentiment === suggestSentimentFilter);
+  }, [suggests, suggestSentimentFilter]);
+
+  // 対策アドバイスのフィルター+ソート適用
+  const filteredAdvice = useMemo(() => {
+    const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    const statusOrder: Record<string, number> = { todo: 0, in_progress: 1, done: 2 };
+
+    let result = adviceList;
+
+    // ステータスフィルター
+    if (adviceStatusFilter !== "all") {
+      result = result.filter((a) => a.status === adviceStatusFilter);
+    }
+
+    // 優先度フィルター
+    if (advicePriorityFilter !== "all") {
+      result = result.filter((a) => a.priority === advicePriorityFilter);
+    }
+
+    // ソート
+    return [...result].sort((a, b) => {
+      let cmp = 0;
+      switch (adviceSortKey) {
+        case "createdAt":
+          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          break;
+        case "priority":
+          cmp = (priorityOrder[a.priority] ?? 99) - (priorityOrder[b.priority] ?? 99);
+          break;
+        case "status":
+          cmp = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
+          break;
+      }
+      return adviceSortDir === "asc" ? cmp : -cmp;
+    });
+  }, [adviceList, adviceStatusFilter, advicePriorityFilter, adviceSortKey, adviceSortDir]);
+
   // sentiment別の集計
   const sentimentCounts = suggests.reduce(
     (acc, s) => {
@@ -469,6 +519,36 @@ export default function SuggestsPage() {
 
       {/* サジェスト一覧テーブル */}
       <div className="card overflow-hidden">
+        {/* センチメントフィルター */}
+        {suggests.length > 0 && (
+          <div className="px-4 py-3 border-b border-navy-700 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted mr-1">フィルター:</span>
+            {(["all", "negative", "neutral", "positive", "unclassified"] as const).map((s) => {
+              const labels: Record<string, string> = { all: "全て", negative: "ネガティブ", neutral: "ニュートラル", positive: "ポジティブ", unclassified: "未分類" };
+              const activeColors: Record<string, string> = {
+                all: "bg-accent-500 text-navy-900",
+                negative: "bg-red-600 text-white",
+                neutral: "bg-blue-600 text-white",
+                positive: "bg-green-600 text-white",
+                unclassified: "bg-gray-600 text-white",
+              };
+              const count = s === "all" ? suggests.length : (sentimentCounts[s] || 0);
+              return (
+                <button
+                  key={s}
+                  onClick={() => setSuggestSentimentFilter(s)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                    suggestSentimentFilter === s
+                      ? activeColors[s]
+                      : "bg-navy-700 text-gray-400 hover:text-white"
+                  }`}
+                >
+                  {labels[s]} ({count})
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -488,7 +568,7 @@ export default function SuggestsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-navy-700">
-              {suggests.length === 0 ? (
+              {filteredSuggests.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-4 py-8 text-center text-muted">
                     {selectedKeywordId
@@ -497,7 +577,7 @@ export default function SuggestsPage() {
                   </td>
                 </tr>
               ) : (
-                suggests.map((s) => {
+                filteredSuggests.map((s) => {
                   const config = SENTIMENT_CONFIG[s.sentiment];
                   return (
                     <tr key={s.id} className="hover:bg-navy-800/50 transition-colors">
@@ -690,16 +770,65 @@ export default function SuggestsPage() {
           </div>
         )}
 
+        {/* 対策アドバイス フィルター・ソートバー */}
+        {adviceList.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <span className="text-xs text-muted mr-1">フィルター:</span>
+            {/* ステータスフィルター */}
+            <select
+              value={adviceStatusFilter}
+              onChange={(e) => setAdviceStatusFilter(e.target.value as typeof adviceStatusFilter)}
+              className="px-2.5 py-1 rounded-lg text-xs font-medium bg-navy-700 text-gray-300 border border-navy-600 focus:outline-none focus:ring-2 focus:ring-accent-500"
+            >
+              <option value="all">全ステータス</option>
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>{STATUS_CONFIG[s].label} ({adviceStatusCounts[s] || 0})</option>
+              ))}
+            </select>
+            {/* 優先度フィルター */}
+            <select
+              value={advicePriorityFilter}
+              onChange={(e) => setAdvicePriorityFilter(e.target.value as typeof advicePriorityFilter)}
+              className="px-2.5 py-1 rounded-lg text-xs font-medium bg-navy-700 text-gray-300 border border-navy-600 focus:outline-none focus:ring-2 focus:ring-accent-500"
+            >
+              <option value="all">全優先度</option>
+              {PRIORITY_OPTIONS.map((p) => (
+                <option key={p} value={p}>{PRIORITY_CONFIG[p].label}</option>
+              ))}
+            </select>
+
+            <div className="w-px h-5 bg-navy-700 mx-1" />
+
+            {/* ソート */}
+            <select
+              value={adviceSortKey}
+              onChange={(e) => setAdviceSortKey(e.target.value as typeof adviceSortKey)}
+              className="px-2.5 py-1 rounded-lg text-xs font-medium bg-navy-700 text-gray-300 border border-navy-600 focus:outline-none focus:ring-2 focus:ring-accent-500"
+            >
+              <option value="createdAt">作成日順</option>
+              <option value="priority">優先度順</option>
+              <option value="status">ステータス順</option>
+            </select>
+            <button
+              onClick={() => setAdviceSortDir(adviceSortDir === "asc" ? "desc" : "asc")}
+              className="px-2.5 py-1 rounded-lg text-xs font-medium bg-navy-700 text-gray-300 border border-navy-600 hover:bg-navy-600 transition-colors"
+              title={adviceSortDir === "asc" ? "昇順" : "降順"}
+            >
+              {adviceSortDir === "asc" ? "▲" : "▼"}
+            </button>
+          </div>
+        )}
+
         {/* 対策アドバイス一覧 */}
         <div className="space-y-3">
-          {adviceList.length === 0 ? (
+          {filteredAdvice.length === 0 ? (
             <div className="card p-6 text-center text-muted">
               {selectedKeywordId
                 ? "対策メモがありません。「対策メモ追加」ボタンまたはサジェスト一覧の「対策追加」から作成できます。"
                 : "キーワードを選択してください"}
             </div>
           ) : (
-            adviceList.map((advice) => {
+            filteredAdvice.map((advice) => {
               const statusConfig = STATUS_CONFIG[advice.status];
               const priorityConfig = PRIORITY_CONFIG[advice.priority];
               return (

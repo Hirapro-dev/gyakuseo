@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { OwnedSite, TrackedUrl, Keyword, RankingHistory, OwnedSiteKeyword } from "@/lib/schema";
 
 // 中間テーブル付きの型
@@ -39,6 +39,13 @@ export default function OwnedSitesPage() {
   });
   const [formKeywordLinks, setFormKeywordLinks] = useState<KeywordLinkForm[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // フィルター・ソート状態
+  const [searchText, setSearchText] = useState("");
+  const [keywordFilter, setKeywordFilter] = useState<number | "all">("all");
+  const [rankFilter, setRankFilter] = useState<"all" | "top10" | "top30" | "top100" | "out" | "nodata">("all");
+  const [sortKey, setSortKey] = useState<"createdAt" | "serviceName" | "bestRank">("createdAt");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // パスワード表示切替（一覧用）
   const [visiblePasswords, setVisiblePasswords] = useState<Set<number>>(new Set());
@@ -285,6 +292,90 @@ export default function OwnedSitesPage() {
     </button>
   );
 
+  // サイトの最良順位を取得（全キーワード中の最小ランク）
+  const getBestRankForSite = useCallback(
+    (site: OwnedSiteWithRelation): number | null => {
+      if (site.ownedSiteKeywords.length === 0) return null;
+      const ranks = site.ownedSiteKeywords
+        .map((osk) => getRankForLink(osk))
+        .filter((r): r is number => r !== null);
+      if (ranks.length === 0) return null;
+      return Math.min(...ranks);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [trackedUrls, rankingData]
+  );
+
+  // フィルター+ソート適用
+  const filteredSites = useMemo(() => {
+    let result = sites;
+
+    // テキスト検索（サービス名・URL部分一致）
+    if (searchText) {
+      const q = searchText.toLowerCase();
+      result = result.filter(
+        (s) =>
+          s.serviceName.toLowerCase().includes(q) ||
+          s.pageUrl.toLowerCase().includes(q) ||
+          (s.memo && s.memo.toLowerCase().includes(q))
+      );
+    }
+
+    // キーワードフィルター
+    if (keywordFilter !== "all") {
+      result = result.filter((s) =>
+        s.ownedSiteKeywords.some((osk) => osk.keywordId === keywordFilter)
+      );
+    }
+
+    // 順位帯フィルター
+    if (rankFilter !== "all") {
+      result = result.filter((s) => {
+        const best = getBestRankForSite(s);
+        switch (rankFilter) {
+          case "top10":
+            return best !== null && best <= 10;
+          case "top30":
+            return best !== null && best > 10 && best <= 30;
+          case "top100":
+            return best !== null && best > 30 && best <= 100;
+          case "out":
+            return best !== null && best > 100;
+          case "nodata":
+            return best === null;
+          default:
+            return true;
+        }
+      });
+    }
+
+    // ソート
+    return [...result].sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "serviceName":
+          cmp = a.serviceName.localeCompare(b.serviceName, "ja");
+          break;
+        case "createdAt":
+          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          break;
+        case "bestRank": {
+          const rankA = getBestRankForSite(a);
+          const rankB = getBestRankForSite(b);
+          // 順位データなし → 最後尾に
+          const valA = rankA ?? 9999;
+          const valB = rankB ?? 9999;
+          cmp = valA - valB;
+          break;
+        }
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [sites, searchText, keywordFilter, rankFilter, sortKey, sortDir, getBestRankForSite]);
+
+  const selectClass =
+    "px-3 py-2 border border-gray-300 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-accent-500";
+
   const inputClass = "w-full px-4 py-2 border border-gray-300 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-950 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-500";
 
   if (loading) {
@@ -498,15 +589,70 @@ export default function OwnedSitesPage() {
 
       {/* サイト一覧（カード形式） */}
       <div className="space-y-4">
-        <h2 className="text-lg font-bold">登録済みサイト ({sites.length}件)</h2>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <h2 className="text-lg font-bold">登録済みサイト ({filteredSites.length}件)</h2>
 
-        {sites.length === 0 && (
+          {/* フィルター・ソートバー */}
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="検索..."
+              className="w-36 px-3 py-2 border border-gray-300 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-500"
+            />
+            <select
+              value={keywordFilter === "all" ? "all" : String(keywordFilter)}
+              onChange={(e) =>
+                setKeywordFilter(e.target.value === "all" ? "all" : Number(e.target.value))
+              }
+              className={selectClass}
+            >
+              <option value="all">全キーワード</option>
+              {allKeywords.map((kw) => (
+                <option key={kw.id} value={kw.id}>{kw.keyword}</option>
+              ))}
+            </select>
+            <select
+              value={rankFilter}
+              onChange={(e) => setRankFilter(e.target.value as typeof rankFilter)}
+              className={selectClass}
+            >
+              <option value="all">全順位</option>
+              <option value="top10">10位以内</option>
+              <option value="top30">11〜30位</option>
+              <option value="top100">31〜100位</option>
+              <option value="out">圏外</option>
+              <option value="nodata">順位データなし</option>
+            </select>
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as "createdAt" | "serviceName" | "bestRank")}
+              className={selectClass}
+            >
+              <option value="createdAt">作成日順</option>
+              <option value="serviceName">名前順</option>
+              <option value="bestRank">順位順</option>
+            </select>
+            <button
+              onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")}
+              className="px-3 py-2 border border-gray-300 dark:border-navy-600 rounded-lg bg-white dark:bg-navy-950 text-gray-900 dark:text-white text-sm hover:bg-gray-50 dark:hover:bg-navy-800 transition-colors"
+              title={sortDir === "asc" ? "昇順" : "降順"}
+            >
+              {sortDir === "asc" ? "▲" : "▼"}
+            </button>
+          </div>
+        </div>
+
+        {filteredSites.length === 0 && (
           <div className="bg-white dark:bg-navy-900 rounded-xl border border-gray-200 dark:border-navy-700 p-12 text-center">
-            <p className="text-gray-500 dark:text-gray-400">サイトが登録されていません</p>
+            <p className="text-gray-500 dark:text-gray-400">
+              {sites.length === 0 ? "サイトが登録されていません" : "条件に一致するサイトがありません"}
+            </p>
           </div>
         )}
 
-        {sites.map((site) => (
+        {filteredSites.map((site) => (
           <div
             key={site.id}
             className="bg-white dark:bg-navy-900 rounded-xl border border-gray-200 dark:border-navy-700 overflow-hidden"
