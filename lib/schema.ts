@@ -24,7 +24,7 @@ export const trackedUrls = pgTable("tracked_urls", {
     .references(() => keywords.id, { onDelete: "cascade" })
     .notNull(),
   url: text("url").notNull(),
-  type: text("type", { enum: ["negative", "positive"] }).notNull(),
+  type: text("type", { enum: ["negative", "positive", "neutral"] }).notNull(),
   label: text("label"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

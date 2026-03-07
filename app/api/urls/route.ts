@@ -47,9 +47,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (type !== "negative" && type !== "positive") {
+    if (type !== "negative" && type !== "positive" && type !== "neutral") {
       return NextResponse.json(
-        { error: "type は 'negative' または 'positive' である必要があります" },
+        { error: "type は 'negative', 'positive', 'neutral' のいずれかである必要があります" },
         { status: 400 }
       );
     }

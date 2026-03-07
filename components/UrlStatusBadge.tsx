@@ -1,17 +1,22 @@
 "use client";
 
-// URL種別（ネガティブ/ポジティブ）のバッジコンポーネント
-export function UrlTypeBadge({ type }: { type: "negative" | "positive" }) {
-  const isNegative = type === "negative";
+// URL種別（ネガティブ/ポジティブ/ニュートラル）のバッジコンポーネント
+export function UrlTypeBadge({ type }: { type: "negative" | "positive" | "neutral" }) {
+  const colorMap = {
+    negative: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+    positive: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+    neutral: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+  };
+  const labelMap = {
+    negative: "ネガティブ",
+    positive: "ポジティブ",
+    neutral: "ニュートラル",
+  };
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-        isNegative
-          ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
-          : "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
-      }`}
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colorMap[type]}`}
     >
-      {isNegative ? "ネガティブ" : "ポジティブ"}
+      {labelMap[type]}
     </span>
   );
 }

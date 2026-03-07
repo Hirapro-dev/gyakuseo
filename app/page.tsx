@@ -15,7 +15,7 @@ interface KeywordWithUrls extends Keyword {
 interface UrlRankInfo {
   url: string;
   label: string | null;
-  type: "negative" | "positive";
+  type: "negative" | "positive" | "neutral";
   latestRank: number | null;
   previousRank: number | null;
 }
@@ -114,7 +114,7 @@ export default function DashboardPage() {
       return {
         url: u.url,
         label: u.label,
-        type: u.type as "negative" | "positive",
+        type: u.type as "negative" | "positive" | "neutral",
         latestRank: urlHistory[0]?.rank ?? null,
         previousRank: urlHistory[1]?.rank ?? null,
       };
