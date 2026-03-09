@@ -42,8 +42,8 @@ export default function ChatPage() {
   const [memories, setMemories] = useState<ChatMemory[]>([]);
   const [loadingMemories, setLoadingMemories] = useState(false);
 
-  // モバイル: セッション一覧の表示切替
-  const [showSidebar, setShowSidebar] = useState(false);
+  // 履歴パネルの表示切替（トグル）
+  const [showHistory, setShowHistory] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -101,6 +101,11 @@ export default function ChatPage() {
     setInput("");
     setSending(true);
 
+    // textareaの高さをリセット
+    if (inputRef.current) {
+      inputRef.current.style.height = "44px";
+    }
+
     // 楽観的にユーザーメッセージを表示
     const tempUserMsg: ChatMessage = {
       id: Date.now(),
@@ -147,7 +152,6 @@ export default function ChatPage() {
       fetchSessions();
     } catch (e) {
       console.error("送信エラー:", e);
-      // エラーメッセージを表示
       const errMsg: ChatMessage = {
         id: Date.now() + 1,
         sessionId: activeSessionId || 0,
@@ -175,14 +179,14 @@ export default function ChatPage() {
     setActiveSessionId(null);
     setMessages([]);
     setInput("");
-    setShowSidebar(false);
+    setShowHistory(false);
     inputRef.current?.focus();
   };
 
   // セッション選択
   const handleSelectSession = (sessionId: number) => {
     setActiveSessionId(sessionId);
-    setShowSidebar(false);
+    setShowHistory(false);
   };
 
   // セッション削除
@@ -239,6 +243,7 @@ export default function ChatPage() {
   // メモリモーダル開く
   const openMemoryModal = () => {
     setShowMemoryModal(true);
+    setShowHistory(false);
     fetchMemories();
   };
 
@@ -262,9 +267,8 @@ export default function ChatPage() {
     }
   };
 
-  // マークダウン簡易レンダリング（太字・改行・コードブロック対応）
+  // マークダウン簡易レンダリング
   const renderMarkdown = (text: string) => {
-    // コードブロック処理
     const parts = text.split(/(```[\s\S]*?```)/g);
     return parts.map((part, i) => {
       if (part.startsWith("```") && part.endsWith("```")) {
@@ -275,17 +279,14 @@ export default function ChatPage() {
           </pre>
         );
       }
-      // インライン処理
       const lines = part.split("\n");
       return lines.map((line, j) => {
-        // 見出し
         if (line.startsWith("### ")) {
           return <h4 key={`${i}-${j}`} className="font-bold text-white mt-3 mb-1">{line.slice(4)}</h4>;
         }
         if (line.startsWith("## ")) {
           return <h3 key={`${i}-${j}`} className="font-bold text-white text-lg mt-3 mb-1">{line.slice(3)}</h3>;
         }
-        // リスト
         if (line.startsWith("- ") || line.startsWith("* ")) {
           return (
             <div key={`${i}-${j}`} className="flex gap-2 ml-2">
@@ -294,7 +295,6 @@ export default function ChatPage() {
             </div>
           );
         }
-        // 番号リスト
         const numMatch = line.match(/^(\d+)\.\s/);
         if (numMatch) {
           return (
@@ -304,17 +304,14 @@ export default function ChatPage() {
             </div>
           );
         }
-        // 空行
         if (line.trim() === "") {
           return <div key={`${i}-${j}`} className="h-2" />;
         }
-        // 通常テキスト
         return <p key={`${i}-${j}`}>{renderInline(line)}</p>;
       });
     });
   };
 
-  // インライン装飾（太字・インラインコード）
   const renderInline = (text: string) => {
     const parts = text.split(/(\*\*.*?\*\*|`[^`]+`)/g);
     return parts.map((part, i) => {
@@ -329,98 +326,10 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-2rem)] lg:h-screen max-w-full">
-      {/* 左パネル: セッション一覧 */}
-      <div
-        className={`${
-          showSidebar ? "translate-x-0" : "-translate-x-full"
-        } lg:translate-x-0 fixed lg:relative z-30 lg:z-auto inset-y-0 left-0 w-72 lg:w-64 bg-navy-900 border-r border-navy-700 flex flex-col transition-transform lg:transition-none`}
-      >
-        {/* ヘッダー */}
-        <div className="p-4 border-b border-navy-700">
-          <button
-            onClick={handleNewChat}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-accent-500 hover:bg-accent-600 text-navy-900 font-medium rounded-lg transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            新規チャット
-          </button>
-        </div>
-
-        {/* セッション一覧 */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {sessions.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-8">
-              まだチャットがありません
-            </p>
-          ) : (
-            sessions.map((session) => (
-              <div
-                key={session.id}
-                onClick={() => handleSelectSession(session.id)}
-                className={`group flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
-                  activeSessionId === session.id
-                    ? "bg-accent-500/20 text-accent-400"
-                    : "text-gray-300 hover:bg-navy-800"
-                }`}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 flex-shrink-0 text-gray-500">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
-                </svg>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm truncate">{session.title}</p>
-                  <p className="text-xs text-gray-500">{formatDate(session.updatedAt)}</p>
-                </div>
-                <button
-                  onClick={(e) => handleDeleteSession(session.id, e)}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-gray-500 hover:text-red-400 transition-all"
-                  title="削除"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                  </svg>
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* メモリ管理ボタン */}
-        <div className="p-3 border-t border-navy-700">
-          <button
-            onClick={openMemoryModal}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-navy-800 transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
-            </svg>
-            メモリ管理
-          </button>
-        </div>
-      </div>
-
-      {/* モバイルオーバーレイ */}
-      {showSidebar && (
-        <div
-          className="lg:hidden fixed inset-0 z-20 bg-black/50"
-          onClick={() => setShowSidebar(false)}
-        />
-      )}
-
-      {/* メインエリア */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* ヘッダー */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-navy-700 bg-navy-900/50">
-          <button
-            onClick={() => setShowSidebar(!showSidebar)}
-            className="lg:hidden p-1.5 rounded-lg text-gray-400 hover:bg-navy-800"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-            </svg>
-          </button>
+    <div className="fixed inset-0 lg:left-60 flex flex-col overflow-hidden">
+      {/* ヘッダー（固定） */}
+      <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-navy-700 bg-navy-900">
+        <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-accent-400">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
@@ -428,113 +337,208 @@ export default function ChatPage() {
             <h1 className="text-white font-semibold">AIチャット</h1>
           </div>
           {activeSessionId && (
-            <span className="text-xs text-gray-500 ml-2">
+            <span className="text-xs text-gray-500 truncate max-w-[200px]">
               {sessions.find((s) => s.id === activeSessionId)?.title}
             </span>
           )}
         </div>
-
-        {/* メッセージエリア */}
-        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
-          {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className="w-16 h-16 rounded-full bg-accent-500/10 flex items-center justify-center mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-accent-400">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
-                </svg>
-              </div>
-              <h2 className="text-lg font-semibold text-white mb-2">RankGuard AIアシスタント</h2>
-              <p className="text-gray-400 text-sm max-w-md">
-                登録中のサイト・キーワード・順位データをもとに、逆SEO対策のアドバイスや分析結果の深掘りができます。
-              </p>
-              <div className="mt-6 grid gap-2 w-full max-w-md">
-                {[
-                  "現在の順位状況を教えて",
-                  "ネガティブ記事への具体的な対策を提案して",
-                  "サジェスト対策の優先順位を教えて",
-                ].map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    onClick={() => {
-                      setInput(suggestion);
-                      inputRef.current?.focus();
-                    }}
-                    className="text-left px-4 py-3 rounded-lg border border-navy-700 text-sm text-gray-300 hover:bg-navy-800 hover:border-accent-500/30 transition-colors"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[85%] lg:max-w-[70%] rounded-2xl px-4 py-3 ${
-                    msg.role === "user"
-                      ? "bg-accent-500 text-navy-900"
-                      : "bg-navy-800 text-gray-200"
-                  }`}
-                >
-                  {msg.role === "assistant" ? (
-                    <div className="text-sm leading-relaxed space-y-1">
-                      {renderMarkdown(msg.content)}
-                    </div>
-                  ) : (
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-
-          {/* 送信中インジケーター */}
-          {sending && (
-            <div className="flex justify-start">
-              <div className="bg-navy-800 rounded-2xl px-4 py-3">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 bg-accent-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <div className="w-2 h-2 bg-accent-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <div className="w-2 h-2 bg-accent-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                </div>
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
+        <div className="flex items-center gap-2">
+          {/* 新規チャットボタン */}
+          <button
+            onClick={handleNewChat}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-500 hover:bg-accent-600 text-navy-900 text-sm font-medium rounded-lg transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            <span className="hidden sm:inline">新規</span>
+          </button>
+          {/* 履歴トグルボタン */}
+          <button
+            onClick={() => { setShowHistory(!showHistory); fetchSessions(); }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+              showHistory
+                ? "bg-accent-500/20 text-accent-400"
+                : "text-gray-400 hover:text-white hover:bg-navy-800"
+            }`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="hidden sm:inline">履歴</span>
+            {sessions.length > 0 && (
+              <span className="bg-navy-700 text-gray-300 text-xs px-1.5 py-0.5 rounded-full">{sessions.length}</span>
+            )}
+          </button>
+          {/* メモリ管理ボタン */}
+          <button
+            onClick={openMemoryModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-navy-800 rounded-lg transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+            </svg>
+            <span className="hidden sm:inline">メモリ</span>
+          </button>
         </div>
+      </div>
 
-        {/* 入力エリア */}
-        <div className="border-t border-navy-700 p-4 bg-navy-900/50">
-          <div className="flex gap-2 max-w-4xl mx-auto">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="メッセージを入力... (Shift+Enterで改行)"
-              rows={1}
-              className="flex-1 resize-none rounded-xl border border-navy-600 bg-navy-800 px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500 transition-colors"
-              style={{ minHeight: "44px", maxHeight: "120px" }}
-              onInput={(e) => {
-                const target = e.target as HTMLTextAreaElement;
-                target.style.height = "auto";
-                target.style.height = Math.min(target.scrollHeight, 120) + "px";
-              }}
-              disabled={sending}
-            />
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || sending}
-              className="flex-shrink-0 px-4 py-2 bg-accent-500 hover:bg-accent-600 disabled:opacity-40 disabled:cursor-not-allowed text-navy-900 font-medium rounded-xl transition-colors"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-              </svg>
-            </button>
+      {/* 履歴ドロップダウンパネル */}
+      {showHistory && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setShowHistory(false)} />
+          <div className="absolute right-4 top-14 z-40 w-80 max-h-[60vh] bg-navy-900 border border-navy-700 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-navy-700">
+              <span className="text-sm font-medium text-white">チャット履歴</span>
+              <button
+                onClick={() => setShowHistory(false)}
+                className="p-1 text-gray-400 hover:text-white transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {sessions.length === 0 ? (
+                <p className="text-gray-500 text-sm text-center py-6">
+                  まだチャットがありません
+                </p>
+              ) : (
+                sessions.map((session) => (
+                  <div
+                    key={session.id}
+                    onClick={() => handleSelectSession(session.id)}
+                    className={`group flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
+                      activeSessionId === session.id
+                        ? "bg-accent-500/20 text-accent-400"
+                        : "text-gray-300 hover:bg-navy-800"
+                    }`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 flex-shrink-0 text-gray-500">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+                    </svg>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm truncate">{session.title}</p>
+                      <p className="text-xs text-gray-500">{formatDate(session.updatedAt)}</p>
+                    </div>
+                    <button
+                      onClick={(e) => handleDeleteSession(session.id, e)}
+                      className="opacity-0 group-hover:opacity-100 p-1 text-gray-500 hover:text-red-400 transition-all"
+                      title="削除"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-3.5 h-3.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                      </svg>
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
+        </>
+      )}
+
+      {/* メッセージエリア（スクロール可能な唯一の部分） */}
+      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
+        {messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="w-16 h-16 rounded-full bg-accent-500/10 flex items-center justify-center mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-accent-400">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+              </svg>
+            </div>
+            <h2 className="text-lg font-semibold text-white mb-2">RankGuard AIアシスタント</h2>
+            <p className="text-gray-400 text-sm max-w-md">
+              登録中のサイト・キーワード・順位データをもとに、逆SEO対策のアドバイスや分析結果の深掘りができます。
+            </p>
+            <div className="mt-6 grid gap-2 w-full max-w-md">
+              {[
+                "現在の順位状況を教えて",
+                "ネガティブ記事への具体的な対策を提案して",
+                "サジェスト対策の優先順位を教えて",
+              ].map((suggestion) => (
+                <button
+                  key={suggestion}
+                  onClick={() => {
+                    setInput(suggestion);
+                    inputRef.current?.focus();
+                  }}
+                  className="text-left px-4 py-3 rounded-lg border border-navy-700 text-sm text-gray-300 hover:bg-navy-800 hover:border-accent-500/30 transition-colors"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`max-w-[85%] lg:max-w-[70%] rounded-2xl px-4 py-3 ${
+                  msg.role === "user"
+                    ? "bg-accent-500 text-navy-900"
+                    : "bg-navy-800 text-gray-200"
+                }`}
+              >
+                {msg.role === "assistant" ? (
+                  <div className="text-sm leading-relaxed space-y-1">
+                    {renderMarkdown(msg.content)}
+                  </div>
+                ) : (
+                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+
+        {/* 送信中インジケーター */}
+        {sending && (
+          <div className="flex justify-start">
+            <div className="bg-navy-800 rounded-2xl px-4 py-3">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 bg-accent-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                <div className="w-2 h-2 bg-accent-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                <div className="w-2 h-2 bg-accent-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+              </div>
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* 入力エリア（固定） */}
+      <div className="flex-shrink-0 border-t border-navy-700 p-4 bg-navy-900">
+        <div className="flex gap-2 max-w-4xl mx-auto">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="メッセージを入力... (Shift+Enterで改行)"
+            rows={1}
+            className="flex-1 resize-none rounded-xl border border-navy-600 bg-navy-800 px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500 transition-colors"
+            style={{ minHeight: "44px", maxHeight: "120px" }}
+            onInput={(e) => {
+              const target = e.target as HTMLTextAreaElement;
+              target.style.height = "auto";
+              target.style.height = Math.min(target.scrollHeight, 120) + "px";
+            }}
+            disabled={sending}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || sending}
+            className="flex-shrink-0 px-4 py-2 bg-accent-500 hover:bg-accent-600 disabled:opacity-40 disabled:cursor-not-allowed text-navy-900 font-medium rounded-xl transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -542,7 +546,6 @@ export default function ChatPage() {
       {showMemoryModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-navy-900 border border-navy-700 rounded-2xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
-            {/* モーダルヘッダー */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-navy-700">
               <div className="flex items-center gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-accent-400">
@@ -559,13 +562,10 @@ export default function ChatPage() {
                 </svg>
               </button>
             </div>
-
-            {/* モーダルコンテンツ */}
             <div className="flex-1 overflow-y-auto p-6">
               <p className="text-sm text-gray-400 mb-4">
                 AIがチャットで学習した情報です。不要なメモリは削除できます。
               </p>
-
               {loadingMemories ? (
                 <div className="text-center py-8 text-gray-500">読み込み中...</div>
               ) : memories.length === 0 ? (
