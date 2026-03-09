@@ -14,6 +14,12 @@ function getTodayStartJST(): Date {
   return new Date(jstToday.getTime() - jstOffset);
 }
 
+// Date or string を安全にISO文字列に変換
+function toISOString(value: Date | string): string {
+  if (value instanceof Date) return value.toISOString();
+  return new Date(value).toISOString();
+}
+
 // POST: 順位変動分析+アドバイス生成
 export async function POST(request: NextRequest) {
   try {
@@ -51,7 +57,7 @@ export async function POST(request: NextRequest) {
       siteDomain = site.pageUrl;
     }
 
-    // 順位履歴取得（このキーワードで同一ドメインのURL全て）
+    // 順位履歴取得（このキーワードで全URL）
     const allHistory = await db.query.rankingHistory.findMany({
       where: eq(rankingHistory.keywordId, keywordId),
       orderBy: [desc(rankingHistory.checkedAt)],
@@ -68,10 +74,13 @@ export async function POST(request: NextRequest) {
     });
 
     // URL単位でグループ化、最新順位を取得
-    const latestByUrl = new Map<string, typeof domainHistory[0]>();
+    const latestByUrl = new Map<string, (typeof domainHistory)[0]>();
     domainHistory.forEach((h) => {
       const existing = latestByUrl.get(h.url);
-      if (!existing || new Date(h.checkedAt).getTime() > new Date(existing.checkedAt).getTime()) {
+      if (
+        !existing ||
+        new Date(h.checkedAt).getTime() > new Date(existing.checkedAt).getTime()
+      ) {
         latestByUrl.set(h.url, h);
       }
     });
@@ -86,28 +95,50 @@ export async function POST(request: NextRequest) {
     const bestUrl = domainArticles[0]?.url || site.pageUrl;
     const urlHistory = domainHistory
       .filter((h) => h.url === bestUrl)
-      .sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime())
+      .sort(
+        (a, b) =>
+          new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime()
+      )
       .slice(0, 20)
-      .map((h) => ({ rank: h.rank, checkedAt: h.checkedAt.toISOString() }));
+      .map((h) => ({
+        rank: h.rank,
+        checkedAt: toISOString(h.checkedAt),
+      }));
 
-    // 対象ページのスクレイピング
-    const scrapedContent = await scrapePageContent(bestUrl);
+    // 対象ページのスクレイピング（タイムアウト5秒に短縮）
+    let scrapedContent = null;
+    try {
+      scrapedContent = await scrapePageContent(bestUrl);
+    } catch {
+      console.error("スクレイピングスキップ:", bestUrl);
+    }
 
     // 当日の検索結果（競合情報）を取得
     const todayStart = getTodayStartJST();
     const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
 
-    const competitors = await db
-      .select()
-      .from(searchResults)
-      .where(
-        and(
-          eq(searchResults.keywordId, keywordId),
-          gte(searchResults.checkedAt, todayStart),
-          lt(searchResults.checkedAt, todayEnd)
+    let competitors: {
+      position: number;
+      title: string;
+      url: string;
+      snippet: string | null;
+      sentiment: string;
+    }[] = [];
+    try {
+      competitors = await db
+        .select()
+        .from(searchResults)
+        .where(
+          and(
+            eq(searchResults.keywordId, keywordId),
+            gte(searchResults.checkedAt, todayStart),
+            lt(searchResults.checkedAt, todayEnd)
+          )
         )
-      )
-      .orderBy(searchResults.position);
+        .orderBy(searchResults.position);
+    } catch {
+      console.error("競合データ取得スキップ");
+    }
 
     // Gemini AIで分析
     const analysis = await analyzeRankChange({
@@ -134,7 +165,8 @@ export async function POST(request: NextRequest) {
       domainArticleCount: domainArticles.length,
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
     console.error("順位分析エラー:", errorMessage);
     return NextResponse.json(
       { error: "順位分析に失敗しました", detail: errorMessage },

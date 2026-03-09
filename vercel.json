@@ -1,4 +1,18 @@
 {
+  "functions": {
+    "app/api/rank-advice/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/suggest-advice/generate/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/negative-articles/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/cron/route.ts": {
+      "maxDuration": 60
+    }
+  },
   "crons": [
     {
       "path": "/api/cron",
