@@ -19,6 +19,18 @@ interface KeywordLinkForm {
   trackedUrlId: number | null;
 }
 
+// AI順位分析結果の型
+interface RankAnalysis {
+  trend: "up" | "down" | "stable" | "new";
+  reason: string;
+  advice: string;
+  urgency: "high" | "medium" | "low";
+  keyword: string;
+  siteName: string;
+  url: string;
+  domainArticleCount: number;
+}
+
 export default function OwnedSitesPage() {
   const [sites, setSites] = useState<OwnedSiteWithRelation[]>([]);
   const [allKeywords, setAllKeywords] = useState<Keyword[]>([]);
@@ -55,6 +67,9 @@ export default function OwnedSitesPage() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   // ドメイン内複数記事の展開状態（キー: "siteId-keywordId"）
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
+  // AI順位分析（キー: "siteId-keywordId"）
+  const [rankAnalysis, setRankAnalysis] = useState<Record<string, RankAnalysis>>({});
+  const [analyzingKey, setAnalyzingKey] = useState<string | null>(null);
 
   // データ取得
   const fetchData = useCallback(async () => {
@@ -171,6 +186,41 @@ export default function OwnedSitesPage() {
       else next.add(key);
       return next;
     });
+  };
+
+  // AI順位分析を実行
+  const handleAnalyzeRank = async (siteId: number, keywordId: number) => {
+    const key = `${siteId}-${keywordId}`;
+    // 既に分析済みなら折りたたみ/展開
+    if (rankAnalysis[key]) {
+      setRankAnalysis((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      return;
+    }
+
+    setAnalyzingKey(key);
+    try {
+      const res = await fetch("/api/rank-advice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ownedSiteId: siteId, keywordId }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`分析エラー: ${err.error || "不明なエラー"}`);
+        return;
+      }
+      const data: RankAnalysis = await res.json();
+      setRankAnalysis((prev) => ({ ...prev, [key]: data }));
+    } catch (error) {
+      console.error("分析エラー:", error);
+      alert("AI分析に失敗しました");
+    } finally {
+      setAnalyzingKey(null);
+    }
   };
 
   // フォームリセット
@@ -783,6 +833,42 @@ export default function OwnedSitesPage() {
                                 </span>
                               )}
                               <RankBadge rank={bestRank} />
+                              {/* AI分析ボタン */}
+                              {bestRank !== null && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAnalyzeRank(site.id, osk.keywordId);
+                                  }}
+                                  disabled={analyzingKey === expandKey}
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 hover:bg-indigo-200 dark:hover:bg-indigo-800/40 transition-colors disabled:opacity-50 whitespace-nowrap"
+                                  title="AI順位分析"
+                                >
+                                  {analyzingKey === expandKey ? (
+                                    <>
+                                      <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                      </svg>
+                                      分析中
+                                    </>
+                                  ) : rankAnalysis[expandKey] ? (
+                                    <>
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                      </svg>
+                                      閉じる
+                                    </>
+                                  ) : (
+                                    <>
+                                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                                      </svg>
+                                      AI分析
+                                    </>
+                                  )}
+                                </button>
+                              )}
                             </div>
 
                             {/* 展開: 同一ドメインの記事一覧 */}
@@ -802,6 +888,57 @@ export default function OwnedSitesPage() {
                                     </a>
                                   </div>
                                 ))}
+                              </div>
+                            )}
+
+                            {/* AI分析結果パネル */}
+                            {rankAnalysis[expandKey] && (
+                              <div className="mt-2 p-3 rounded-lg bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 text-sm">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${
+                                    rankAnalysis[expandKey].trend === "up"
+                                      ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                      : rankAnalysis[expandKey].trend === "down"
+                                      ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                                      : rankAnalysis[expandKey].trend === "new"
+                                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                                      : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400"
+                                  }`}>
+                                    {rankAnalysis[expandKey].trend === "up" ? "↑ 上昇"
+                                      : rankAnalysis[expandKey].trend === "down" ? "↓ 下降"
+                                      : rankAnalysis[expandKey].trend === "new" ? "★ 新規"
+                                      : "→ 安定"}
+                                  </span>
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
+                                    rankAnalysis[expandKey].urgency === "high"
+                                      ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                                      : rankAnalysis[expandKey].urgency === "medium"
+                                      ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                                      : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                  }`}>
+                                    {rankAnalysis[expandKey].urgency === "high" ? "緊急度: 高"
+                                      : rankAnalysis[expandKey].urgency === "medium" ? "緊急度: 中"
+                                      : "緊急度: 低"}
+                                  </span>
+                                </div>
+                                <div className="space-y-2">
+                                  <div>
+                                    <span className="text-xs font-bold text-indigo-700 dark:text-indigo-400 block mb-0.5">
+                                      変動理由の推測
+                                    </span>
+                                    <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
+                                      {rankAnalysis[expandKey].reason}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <span className="text-xs font-bold text-indigo-700 dark:text-indigo-400 block mb-0.5">
+                                      改善アドバイス
+                                    </span>
+                                    <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
+                                      {rankAnalysis[expandKey].advice}
+                                    </p>
+                                  </div>
+                                </div>
                               </div>
                             )}
                           </div>
