@@ -261,6 +261,45 @@ export const publishLogsRelations = relations(publishLogs, ({ one }) => ({
   }),
 }));
 
+// AIチャットセッションテーブル
+export const chatSessions = pgTable("chat_sessions", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// AIチャットメッセージテーブル
+export const chatMessages = pgTable("chat_messages", {
+  id: serial("id").primaryKey(),
+  sessionId: integer("session_id")
+    .references(() => chatSessions.id, { onDelete: "cascade" })
+    .notNull(),
+  role: text("role", { enum: ["user", "assistant"] }).notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// AIチャットメモリテーブル（パーソナライズ学習用）
+export const chatMemories = pgTable("chat_memories", {
+  id: serial("id").primaryKey(),
+  content: text("content").notNull(), // 学習した情報
+  source: text("source"), // 情報の出典（例：「セッション#5で言及」）
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// チャット関連リレーション
+export const chatSessionsRelations = relations(chatSessions, ({ many }) => ({
+  messages: many(chatMessages),
+}));
+
+export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({
+  session: one(chatSessions, {
+    fields: [chatMessages.sessionId],
+    references: [chatSessions.id],
+  }),
+}));
+
 // 型定義のエクスポート
 export type Keyword = typeof keywords.$inferSelect;
 export type NewKeyword = typeof keywords.$inferInsert;
@@ -284,3 +323,9 @@ export type SuggestAdvice = typeof suggestAdvice.$inferSelect;
 export type NewSuggestAdvice = typeof suggestAdvice.$inferInsert;
 export type SearchResult = typeof searchResults.$inferSelect;
 export type NewSearchResult = typeof searchResults.$inferInsert;
+export type ChatSession = typeof chatSessions.$inferSelect;
+export type NewChatSession = typeof chatSessions.$inferInsert;
+export type ChatMessage = typeof chatMessages.$inferSelect;
+export type NewChatMessage = typeof chatMessages.$inferInsert;
+export type ChatMemory = typeof chatMemories.$inferSelect;
+export type NewChatMemory = typeof chatMemories.$inferInsert;

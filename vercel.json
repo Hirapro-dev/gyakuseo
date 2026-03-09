@@ -11,6 +11,9 @@
     },
     "app/api/cron/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/chat/route.ts": {
+      "maxDuration": 60
     }
   },
   "crons": [
