@@ -210,7 +210,7 @@ export default function OwnedSitesPage() {
       });
       if (!res.ok) {
         const err = await res.json();
-        alert(`分析エラー: ${err.error || "不明なエラー"}`);
+        alert(`分析エラー: ${err.error || "不明なエラー"}${err.detail ? `\n詳細: ${err.detail}` : ""}`);
         return;
       }
       const data: RankAnalysis = await res.json();

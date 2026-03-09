@@ -26,6 +26,7 @@ export interface RankAnalysisResult {
 
 /**
  * Gemini AIで順位変動の理由を推測し、改善アドバイスを生成する
+ * gemini-2.0-flashを使用（高速・安定）
  */
 export async function analyzeRankChange(params: {
   keyword: string;
@@ -42,7 +43,6 @@ export async function analyzeRankChange(params: {
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
 
   // 順位変動トレンドを計算
   const sorted = [...params.rankHistory].sort(
@@ -63,24 +63,30 @@ export async function analyzeRankChange(params: {
   // 直近の順位推移テキスト
   const historyText = sorted
     .slice(0, 10)
-    .map((h) => `${new Date(h.checkedAt).toLocaleDateString("ja-JP")}: ${h.rank === 101 ? "圏外" : h.rank + "位"}`)
+    .map((h) => {
+      try {
+        return `${new Date(h.checkedAt).toLocaleDateString("ja-JP")}: ${h.rank === 101 ? "圏外" : h.rank + "位"}`;
+      } catch {
+        return `日付不明: ${h.rank === 101 ? "圏外" : h.rank + "位"}`;
+      }
+    })
     .join("\n");
 
   // 自社ページの情報テキスト
   let pageInfoText = "※ページ内容を取得できませんでした";
   if (params.scrapedContent) {
     const sc = params.scrapedContent;
-    pageInfoText = `タイトル: ${sc.title}
+    pageInfoText = `タイトル: ${sc.title || "不明"}
 説明: ${sc.description || "なし"}
 見出し: ${sc.headings.slice(0, 8).join(" / ") || "なし"}
-本文（抜粋）: ${sc.bodyText.slice(0, 800)}`;
+本文（抜粋）: ${(sc.bodyText || "").slice(0, 600)}`;
   }
 
-  // 競合情報テキスト
+  // 競合情報テキスト（最大5件に絞る）
   const competitorText = params.competitors.length > 0
     ? params.competitors
-        .slice(0, 10)
-        .map((c) => `${c.position}位: ${c.title}\n   URL: ${c.url}\n   概要: ${c.snippet || "なし"}`)
+        .slice(0, 5)
+        .map((c) => `${c.position}位: ${c.title}\n   URL: ${c.url}`)
         .join("\n\n")
     : "競合データなし";
 
@@ -89,9 +95,9 @@ export async function analyzeRankChange(params: {
     ? `\n## 同一ドメインの他の記事（${params.domainArticles.length}件）\n${params.domainArticles.map((a) => `- ${a.rank}位: ${a.title || a.url}`).join("\n")}`
     : "";
 
-  const prompt = `あなたは逆SEO・検索順位最適化の日本市場トップクラスの専門家です。
+  const prompt = `あなたは逆SEO・検索順位最適化の専門家です。
 
-以下の情報を分析し、この自社ページの順位変動の理由を推測し、順位を改善するための具体的なアドバイスを提供してください。
+以下の情報を分析し、順位変動の理由推測と改善アドバイスをJSON形式で返してください。
 
 ## 基本情報
 - キーワード: 「${params.keyword}」
@@ -105,43 +111,60 @@ ${historyText || "データなし"}
 ## 対象ページの内容
 ${pageInfoText}
 
-## 検索結果の競合状況（上位ページ）
+## 検索結果の競合状況
 ${competitorText}
 ${domainArticlesText}
 
-## 出力形式
-以下のJSON形式で**1件**を返してください。説明やマークダウンは不要で、有効なJSONのみ返してください。
+以下のJSON形式で返してください。JSONのみ返してください。
 
-{
-  "trend": "up/down/stable/newのいずれか",
-  "reason": "順位が変動した（または安定している）理由の推測。200〜500文字程度で具体的に。競合との比較、コンテンツの強み・弱み、検索意図との一致度などを踏まえて分析してください。",
-  "advice": "順位をさらに上げる（または維持する）ための具体的なアドバイス。200〜500文字程度で、何を・どこで・どうするかを明確に。コンテンツ追加/修正の具体案、更新頻度、内部リンク、SNS連携、被リンク獲得などの施策を含めてください。",
-  "urgency": "high/medium/lowのいずれか（圏外や大幅下降ならhigh、微減ならmedium、上昇・安定ならlow）"
-}
+{"trend":"up/down/stable/newのいずれか","reason":"変動理由の推測（200文字程度）","advice":"改善アドバイス（200文字程度）","urgency":"high/medium/lowのいずれか"}`;
 
-注意:
-- 逆SEOの文脈（ネガティブ記事を押し下げてポジティブコンテンツを上位表示させたい）で分析してください
-- 日本語の検索エンジン最適化の最新知見に基づいてください
-- 推測が難しい部分は「〜の可能性があります」のように断定を避けてください`;
+  // gemini-2.0-flashを優先、失敗時はgemini-1.5-flashにフォールバック
+  const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
 
-  const result = await model.generateContent(prompt);
-  const response = result.response;
-  const text = response.text();
+  for (const modelName of models) {
+    try {
+      console.log(`Geminiモデル ${modelName} で分析開始...`);
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt);
+      const response = result.response;
+      const text = response.text();
 
-  // JSONパース
-  const jsonStr = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      // JSONパース
+      const jsonStr = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      const parsed: RankAnalysisResult = JSON.parse(jsonStr);
 
-  try {
-    const parsed: RankAnalysisResult = JSON.parse(jsonStr);
-    return {
-      trend: ["up", "down", "stable", "new"].includes(parsed.trend) ? parsed.trend : "stable",
-      reason: parsed.reason,
-      advice: parsed.advice,
-      urgency: ["high", "medium", "low"].includes(parsed.urgency) ? parsed.urgency : "medium",
-    };
-  } catch (error) {
-    console.error("Geminiレスポンスのパースエラー:", error);
-    console.error("レスポンス:", text);
-    throw new Error("AIの応答を解析できませんでした");
+      return {
+        trend: ["up", "down", "stable", "new"].includes(parsed.trend) ? parsed.trend : "stable",
+        reason: parsed.reason || "分析データが不足しています",
+        advice: parsed.advice || "順位データの蓄積をお待ちください",
+        urgency: ["high", "medium", "low"].includes(parsed.urgency) ? parsed.urgency : "medium",
+      };
+    } catch (error) {
+      console.error(`Geminiモデル ${modelName} でエラー:`, error instanceof Error ? error.message : error);
+      // 次のモデルを試す
+      continue;
+    }
   }
+
+  // 全モデル失敗時のフォールバック結果
+  // 順位データからトレンドだけは自力で判定
+  let fallbackTrend: "up" | "down" | "stable" | "new" = "stable";
+  let fallbackUrgency: "high" | "medium" | "low" = "medium";
+
+  if (latestRank === null) {
+    fallbackTrend = "new";
+  } else if (previousRank !== null) {
+    if (latestRank < previousRank) fallbackTrend = "up";
+    else if (latestRank > previousRank) fallbackTrend = "down";
+  }
+  if (latestRank !== null && latestRank > 50) fallbackUrgency = "high";
+  if (latestRank !== null && latestRank <= 10) fallbackUrgency = "low";
+
+  return {
+    trend: fallbackTrend,
+    reason: `現在${latestRank !== null ? latestRank + "位" : "順位データなし"}です。AI分析サービスに一時的に接続できませんでした。順位データの蓄積が増えると、より精度の高い分析が可能になります。`,
+    advice: "定期的にコンテンツを更新し、関連キーワードを含む質の高い記事を投稿してください。SNS連携やGoogleビジネスプロフィールの充実も効果的です。",
+    urgency: fallbackUrgency,
+  };
 }
