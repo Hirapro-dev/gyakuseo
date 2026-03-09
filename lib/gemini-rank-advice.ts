@@ -119,8 +119,8 @@ ${domainArticlesText}
 
 {"trend":"up/down/stable/newのいずれか","reason":"変動理由の推測（200文字程度）","advice":"改善アドバイス（200文字程度）","urgency":"high/medium/lowのいずれか"}`;
 
-  // gemini-2.0-flashを優先、失敗時はgemini-1.5-flashにフォールバック
-  const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
+  // gemini-2.5-proを優先、失敗時はgemini-2.5-flashにフォールバック
+  const models = ["gemini-2.5-pro", "gemini-2.5-flash"];
 
   for (const modelName of models) {
     try {
