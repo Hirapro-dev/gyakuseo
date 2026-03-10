@@ -166,12 +166,10 @@ export default function ChatPage() {
     }
   };
 
-  // Enterキーで送信（Shift+Enterで改行）
+  // Enterキーは改行のみ（送信はボタンのみ）
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    // 何もしない（Enterは通常通り改行になる）
+    void e;
   };
 
   // 新規チャット
@@ -519,7 +517,7 @@ export default function ChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="メッセージを入力... (Shift+Enterで改行)"
+            placeholder="メッセージを入力..."
             rows={1}
             className="flex-1 resize-none rounded-xl border border-navy-600 bg-navy-800 px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500 transition-colors"
             style={{ minHeight: "44px", maxHeight: "120px" }}
