@@ -4,10 +4,12 @@ import {
   keywords,
   ownedSites,
   suggestAdvice,
+  suggestHistory,
   rankingHistory,
   trackedUrls,
   searchResults,
   chatMemories,
+  ownedSiteKeywords,
 } from "./schema";
 import { eq, desc } from "drizzle-orm";
 
@@ -76,17 +78,67 @@ async function buildContextFromDB(): Promise<string> {
     }
   } catch {}
 
-  // 直近のアドバイス
+  // サジェスト履歴（最新のネガティブサジェストワード）
+  try {
+    const suggests = await db.query.suggestHistory.findMany({
+      orderBy: [desc(suggestHistory.checkedAt)],
+      limit: 50,
+      with: { keyword: true },
+    });
+    if (suggests.length > 0) {
+      // キーワード別にグルーピング
+      const byKw = new Map<string, { text: string; sentiment: string; position: number }[]>();
+      for (const s of suggests) {
+        const kwName = s.keyword?.keyword || "不明";
+        if (!byKw.has(kwName)) byKw.set(kwName, []);
+        byKw.get(kwName)!.push({ text: s.suggestText, sentiment: s.sentiment, position: s.position });
+      }
+      const suggestLines: string[] = [];
+      byKw.forEach((items, kw) => {
+        const negatives = items.filter(i => i.sentiment === "negative");
+        const others = items.filter(i => i.sentiment !== "negative");
+        suggestLines.push(`### 「${kw}」のサジェスト`);
+        if (negatives.length > 0) {
+          suggestLines.push(`ネガティブ: ${negatives.map(n => `"${n.text}"(${n.position}番目)`).join(", ")}`);
+        }
+        if (others.length > 0) {
+          suggestLines.push(`その他: ${others.map(n => `"${n.text}"[${n.sentiment}]`).join(", ")}`);
+        }
+      });
+      sections.push(`## サジェスト状況\n${suggestLines.join("\n")}`);
+    }
+  } catch {}
+
+  // サジェスト対策アドバイス（全文表示）
   try {
     const advices = await db.query.suggestAdvice.findMany({
       orderBy: [desc(suggestAdvice.createdAt)],
-      limit: 15,
+      limit: 30,
       with: { keyword: true },
     });
     if (advices.length > 0) {
-      sections.push(
-        `## 直近のAI対策アドバイス\n${advices.map((a) => `- [${a.priority}][${a.status}]${a.keyword?.keyword ? `「${a.keyword.keyword}」` : ""}: ${a.advice.slice(0, 150)}`).join("\n")}`
-      );
+      const adviceLines = advices.map((a) => {
+        const kwLabel = a.keyword?.keyword ? `「${a.keyword.keyword}」` : "";
+        const suggestLabel = a.suggestText ? ` → サジェスト"${a.suggestText}"` : "";
+        return `### [優先度:${a.priority}][状態:${a.status}] ${kwLabel}${suggestLabel}\n${a.advice}`;
+      });
+      sections.push(`## サジェスト対策AIアドバイス一覧\n以下はAIが生成した対策アドバイスの全内容です。ユーザーがこれらの内容について質問した場合は、アドバイスの内容を踏まえて具体的に深掘りしてください。\n\n${adviceLines.join("\n\n---\n\n")}`);
+    }
+  } catch {}
+
+  // 自社サイト×キーワード紐付け
+  try {
+    const osk = await db.query.ownedSiteKeywords.findMany({
+      with: { ownedSite: true, keyword: true, trackedUrl: true },
+    });
+    if (osk.length > 0) {
+      const oskLines = osk.map((o) => {
+        const siteName = o.ownedSite?.serviceName || "不明";
+        const kwName = o.keyword?.keyword || "不明";
+        const url = o.trackedUrl?.url || o.ownedSite?.pageUrl || "";
+        return `- ${siteName} × 「${kwName}」 → ${url}`;
+      });
+      sections.push(`## 自社サイト×キーワード紐付け\n${oskLines.join("\n")}`);
     }
   } catch {}
 
@@ -95,12 +147,12 @@ async function buildContextFromDB(): Promise<string> {
     const negatives = await db.query.searchResults.findMany({
       where: eq(searchResults.sentiment, "negative"),
       orderBy: [desc(searchResults.checkedAt)],
-      limit: 10,
+      limit: 20,
       with: { keyword: true },
     });
     if (negatives.length > 0) {
       sections.push(
-        `## 検出済みネガティブ記事\n${negatives.map((n) => `- ${n.position}位「${n.title}」(${n.keyword?.keyword || "不明"}) - ${n.reason || "理由未記載"}`).join("\n")}`
+        `## 検出済みネガティブ記事\n${negatives.map((n) => `- ${n.position}位「${n.title}」(${n.keyword?.keyword || "不明"}) URL: ${n.url}\n  判定理由: ${n.reason || "未記載"}\n  スニペット: ${n.snippet || "なし"}`).join("\n")}`
       );
     }
   } catch {}
@@ -146,11 +198,19 @@ export async function generateChatResponse(
 ${context}
 
 ## あなたの役割
-- 逆SEO・レピュテーション管理の専門家として回答
-- RankGuardのデータに基づいた具体的なアドバイスを提供
-- ユーザーの質問に対して、登録データを参照しながら回答
-- 施策の提案は具体的（何を・どこで・どうするか）に
+- 逆SEO・レピュテーション管理・サジェスト対策の専門家として回答
+- RankGuardのデータ（サジェスト状況・AIアドバイス・順位・ネガティブ記事）すべてに基づいた具体的な回答を提供
+- ユーザーが「アドバイスに対する質問」をした場合、上記のAIアドバイス内容を正確に参照し、そのアドバイスを深掘り・具体化・補足して回答
+- 施策の提案は具体的（何を・どこで・どうするか・優先順位）に
 - 日本語で回答
+
+## アドバイスへの質問対応（重要）
+ユーザーは「サジェスト対策AIアドバイス一覧」に記載された内容について質問してくることが多いです。
+例えば：
+- 「〇〇を強化って具体的にどうすればいい？」→ アドバイスの内容を特定し、その施策を具体的な手順に分解して回答
+- 「〇〇という情報を載せているけど正解？」→ アドバイスの文脈を踏まえて、掲載情報の適切さを評価し改善案を提示
+- 「どの対策から始めるべき？」→ 優先度・現在の順位・サジェスト状況を総合的に判断して推奨順を提示
+- 「この対策で効果はある？」→ 一般的なSEO/逆SEO知見 + ユーザーの状況データを組み合わせて回答
 
 ## 重要なルール
 回答は以下のJSON形式で返してください。JSONのみ返してください。
@@ -161,6 +221,7 @@ memoryに記録する例：
 - 対策対象の人物名や企業の背景情報
 - ユーザーが試した施策の結果
 - ユーザーの好みや方針（例：「積極的なSNS運用は避けたい」）
+- ユーザーが現在実施中の施策の内容
 
 memoryに記録しないもの：
 - 一般的な質問（例：「SEOとは？」）
