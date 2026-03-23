@@ -17,6 +17,7 @@ interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  imageUrls?: string[]; // クライアント側のみ：画像プレビューURL
 }
 
 // メモリ型
@@ -36,6 +37,11 @@ export default function ChatPage() {
   // 入力・送信
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+
+  // 画像添付
+  const [attachedImages, setAttachedImages] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // メモリ管理モーダル
   const [showMemoryModal, setShowMemoryModal] = useState(false);
@@ -93,12 +99,50 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // 画像選択ハンドラー
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const newFiles: File[] = [];
+    const newPreviews: string[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      // 画像ファイルのみ許可（最大5枚、各10MB以下）
+      if (!file.type.startsWith("image/")) continue;
+      if (file.size > 10 * 1024 * 1024) continue;
+      if (attachedImages.length + newFiles.length >= 5) break;
+
+      newFiles.push(file);
+      newPreviews.push(URL.createObjectURL(file));
+    }
+
+    setAttachedImages((prev) => [...prev, ...newFiles]);
+    setImagePreviews((prev) => [...prev, ...newPreviews]);
+
+    // input をリセット（同じファイルを再選択可能にする）
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // 画像削除
+  const removeImage = (index: number) => {
+    URL.revokeObjectURL(imagePreviews[index]);
+    setAttachedImages((prev) => prev.filter((_, i) => i !== index));
+    setImagePreviews((prev) => prev.filter((_, i) => i !== index));
+  };
+
   // メッセージ送信
   const handleSend = async () => {
-    if (!input.trim() || sending) return;
+    if ((!input.trim() && attachedImages.length === 0) || sending) return;
 
-    const userMessage = input.trim();
+    const userMessage = input.trim() || "この画像を分析してください";
+    const currentImages = [...attachedImages];
+    const currentPreviews = [...imagePreviews];
+
     setInput("");
+    setAttachedImages([]);
+    setImagePreviews([]);
     setSending(true);
 
     // textareaの高さをリセット
@@ -106,25 +150,49 @@ export default function ChatPage() {
       inputRef.current.style.height = "44px";
     }
 
-    // 楽観的にユーザーメッセージを表示
+    // 楽観的にユーザーメッセージを表示（画像付き）
+    const displayContent = currentImages.length > 0
+      ? `${userMessage}\n\n[画像${currentImages.length}枚添付]`
+      : userMessage;
+
     const tempUserMsg: ChatMessage = {
       id: Date.now(),
       sessionId: activeSessionId || 0,
       role: "user",
-      content: userMessage,
+      content: displayContent,
       createdAt: new Date().toISOString(),
+      imageUrls: currentPreviews,
     };
     setMessages((prev) => [...prev, tempUserMsg]);
 
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: activeSessionId,
-          message: userMessage,
-        }),
-      });
+      let res: Response;
+
+      if (currentImages.length > 0) {
+        // 画像ありの場合はFormDataで送信
+        const formData = new FormData();
+        formData.append("message", userMessage);
+        if (activeSessionId) {
+          formData.append("sessionId", activeSessionId.toString());
+        }
+        for (const img of currentImages) {
+          formData.append("images", img);
+        }
+        res = await fetch("/api/chat", {
+          method: "POST",
+          body: formData,
+        });
+      } else {
+        // テキストのみの場合はJSON（従来通り）
+        res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: activeSessionId,
+            message: userMessage,
+          }),
+        });
+      }
 
       if (!res.ok) {
         const errData = await res.json();
@@ -162,6 +230,8 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, errMsg]);
     } finally {
       setSending(false);
+      // プレビューURLを解放
+      currentPreviews.forEach((url) => URL.revokeObjectURL(url));
       inputRef.current?.focus();
     }
   };
@@ -482,6 +552,19 @@ export default function ChatPage() {
                     : "bg-navy-800 text-gray-200"
                 }`}
               >
+                {/* 画像プレビュー（ユーザーメッセージのみ） */}
+                {msg.imageUrls && msg.imageUrls.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {msg.imageUrls.map((url, i) => (
+                      <img
+                        key={i}
+                        src={url}
+                        alt={`添付画像${i + 1}`}
+                        className="max-w-[200px] max-h-[150px] rounded-lg object-cover"
+                      />
+                    ))}
+                  </div>
+                )}
                 {msg.role === "assistant" ? (
                   <div className="text-sm leading-relaxed space-y-1">
                     {renderMarkdown(msg.content)}
@@ -511,32 +594,76 @@ export default function ChatPage() {
 
       {/* 入力エリア（固定） */}
       <div className="flex-shrink-0 border-t border-navy-700 p-4 bg-navy-900">
-        <div className="flex gap-2 max-w-4xl mx-auto">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="メッセージを入力..."
-            rows={1}
-            className="flex-1 resize-none rounded-xl border border-navy-600 bg-navy-800 px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500 transition-colors"
-            style={{ minHeight: "44px", maxHeight: "120px" }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = "auto";
-              target.style.height = Math.min(target.scrollHeight, 120) + "px";
-            }}
-            disabled={sending}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || sending}
-            className="flex-shrink-0 px-4 py-2 bg-accent-500 hover:bg-accent-600 disabled:opacity-40 disabled:cursor-not-allowed text-navy-900 font-medium rounded-xl transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-            </svg>
-          </button>
+        <div className="max-w-4xl mx-auto">
+          {/* 画像プレビュー */}
+          {imagePreviews.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {imagePreviews.map((url, i) => (
+                <div key={i} className="relative group">
+                  <img
+                    src={url}
+                    alt={`添付画像${i + 1}`}
+                    className="w-16 h-16 rounded-lg object-cover border border-navy-600"
+                  />
+                  <button
+                    onClick={() => removeImage(i)}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <span className="self-end text-xs text-gray-500 mb-1">
+                {attachedImages.length}/5枚
+              </span>
+            </div>
+          )}
+          <div className="flex gap-2">
+            {/* 画像添付ボタン */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleImageSelect}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={sending || attachedImages.length >= 5}
+              className="flex-shrink-0 px-3 py-2 text-gray-400 hover:text-accent-400 hover:bg-navy-800 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl transition-colors"
+              title="画像を添付（最大5枚）"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Zm16.5-13.5h.008v.008h-.008V7.5Zm0 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+              </svg>
+            </button>
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={attachedImages.length > 0 ? "画像についてメッセージを入力..." : "メッセージを入力..."}
+              rows={1}
+              className="flex-1 resize-none rounded-xl border border-navy-600 bg-navy-800 px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500 transition-colors"
+              style={{ minHeight: "44px", maxHeight: "120px" }}
+              onInput={(e) => {
+                const target = e.target as HTMLTextAreaElement;
+                target.style.height = "auto";
+                target.style.height = Math.min(target.scrollHeight, 120) + "px";
+              }}
+              disabled={sending}
+            />
+            <button
+              onClick={handleSend}
+              disabled={(!input.trim() && attachedImages.length === 0) || sending}
+              className="flex-shrink-0 px-4 py-2 bg-accent-500 hover:bg-accent-600 disabled:opacity-40 disabled:cursor-not-allowed text-navy-900 font-medium rounded-xl transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 

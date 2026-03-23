@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { chatSessions, chatMessages, chatMemories } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { generateChatResponse } from "@/lib/gemini-chat";
+import type { ImageData } from "@/lib/gemini-chat";
 
 // GET: セッション一覧取得
 export async function GET() {
@@ -20,11 +21,39 @@ export async function GET() {
   }
 }
 
-// POST: メッセージ送信 → AI応答生成 → DB保存
+// POST: メッセージ送信 → AI応答生成 → DB保存（FormData対応・画像添付可）
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { sessionId, message } = body;
+    let message: string;
+    let sessionId: number | null = null;
+    const images: ImageData[] = [];
+
+    const contentType = request.headers.get("content-type") || "";
+
+    if (contentType.includes("multipart/form-data")) {
+      // FormDataで受信（画像添付あり）
+      const formData = await request.formData();
+      message = (formData.get("message") as string) || "";
+      const sid = formData.get("sessionId") as string;
+      if (sid) sessionId = parseInt(sid);
+
+      // 画像ファイルを取得してbase64に変換
+      const imageFiles = formData.getAll("images") as File[];
+      for (const file of imageFiles) {
+        if (file && file.size > 0) {
+          const buffer = Buffer.from(await file.arrayBuffer());
+          images.push({
+            base64: buffer.toString("base64"),
+            mimeType: file.type || "image/png",
+          });
+        }
+      }
+    } else {
+      // JSONで受信（従来方式）
+      const body = await request.json();
+      message = body.message || "";
+      sessionId = body.sessionId || null;
+    }
 
     if (!message || typeof message !== "string" || message.trim() === "") {
       return NextResponse.json(
@@ -37,7 +66,6 @@ export async function POST(request: NextRequest) {
 
     // セッションが指定されていなければ新規作成
     if (!currentSessionId) {
-      // セッションタイトル: メッセージの先頭30文字
       const title = message.trim().slice(0, 30) + (message.length > 30 ? "..." : "");
       const [newSession] = await db
         .insert(chatSessions)
@@ -50,11 +78,15 @@ export async function POST(request: NextRequest) {
       currentSessionId = newSession.id;
     }
 
-    // ユーザーメッセージをDB保存
+    // ユーザーメッセージをDB保存（画像添付があれば記録）
+    const contentText = images.length > 0
+      ? `${message.trim()}\n\n[画像${images.length}枚添付]`
+      : message.trim();
+
     await db.insert(chatMessages).values({
       sessionId: currentSessionId,
       role: "user",
-      content: message.trim(),
+      content: contentText,
       createdAt: new Date(),
     });
 
@@ -64,13 +96,17 @@ export async function POST(request: NextRequest) {
       orderBy: [chatMessages.createdAt],
     });
 
-    // Gemini AIで応答生成
+    // Gemini AIで応答生成（画像も渡す）
     const chatHistory = history.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     }));
 
-    const aiResponse = await generateChatResponse(chatHistory, message.trim());
+    const aiResponse = await generateChatResponse(
+      chatHistory,
+      message.trim(),
+      images.length > 0 ? images : undefined
+    );
 
     // AI応答をDB保存
     const [savedMessage] = await db

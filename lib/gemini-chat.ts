@@ -19,6 +19,12 @@ interface ChatHistoryItem {
   content: string;
 }
 
+// 画像データの型
+export interface ImageData {
+  base64: string; // base64エンコードされた画像データ
+  mimeType: string; // 例: "image/png", "image/jpeg"
+}
+
 // AI応答の型
 export interface ChatResponse {
   reply: string;
@@ -173,11 +179,12 @@ async function buildContextFromDB(): Promise<string> {
 }
 
 /**
- * Gemini AIでチャット応答を生成
+ * Gemini AIでチャット応答を生成（画像添付対応）
  */
 export async function generateChatResponse(
   history: ChatHistoryItem[],
-  userMessage: string
+  userMessage: string,
+  images?: ImageData[]
 ): Promise<ChatResponse> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -202,6 +209,7 @@ ${context}
 - RankGuardのデータ（サジェスト状況・AIアドバイス・順位・ネガティブ記事）すべてに基づいた具体的な回答を提供
 - ユーザーが「アドバイスに対する質問」をした場合、上記のAIアドバイス内容を正確に参照し、そのアドバイスを深掘り・具体化・補足して回答
 - 施策の提案は具体的（何を・どこで・どうするか・優先順位）に
+- 画像が添付された場合は、画像の内容を分析し、逆SEO対策の文脈で回答（スクリーンショットの解析、検索結果画面の分析など）
 - 日本語で回答
 
 ## アドバイスへの質問対応（重要）
@@ -211,6 +219,12 @@ ${context}
 - 「〇〇という情報を載せているけど正解？」→ アドバイスの文脈を踏まえて、掲載情報の適切さを評価し改善案を提示
 - 「どの対策から始めるべき？」→ 優先度・現在の順位・サジェスト状況を総合的に判断して推奨順を提示
 - 「この対策で効果はある？」→ 一般的なSEO/逆SEO知見 + ユーザーの状況データを組み合わせて回答
+
+## 画像解析について
+ユーザーが画像を添付した場合：
+- 検索結果のスクリーンショット → 表示されている記事やサジェストを読み取り分析
+- サイトのスクリーンショット → SEO上の改善点やコンテンツ品質を評価
+- その他の画像 → 逆SEO対策の文脈で有用な情報を抽出
 
 ## 重要なルール
 回答は以下のJSON形式で返してください。JSONのみ返してください。
@@ -237,7 +251,26 @@ memoryに記録しないもの：
     ? `${systemPrompt}\n\n## これまでの会話\n${historyText}\n\nユーザー: ${userMessage}`
     : `${systemPrompt}\n\nユーザー: ${userMessage}`;
 
-  const result = await model.generateContent(fullPrompt);
+  // 画像がある場合はマルチモーダルリクエスト
+  let result;
+  if (images && images.length > 0) {
+    // テキスト + 画像パーツを構築
+    const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [
+      { text: fullPrompt },
+    ];
+    for (const img of images) {
+      parts.push({
+        inlineData: {
+          data: img.base64,
+          mimeType: img.mimeType,
+        },
+      });
+    }
+    result = await model.generateContent(parts);
+  } else {
+    result = await model.generateContent(fullPrompt);
+  }
+
   const response = result.response;
   const text = response.text();
 
