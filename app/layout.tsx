@@ -4,7 +4,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { Sidebar } from "@/components/Sidebar";
 
 export const metadata: Metadata = {
-  title: "RankGuard - 逆SEO対策管理ツール",
+  title: "nodeSEO - 逆SEO対策管理ツール",
   description: "検索順位の監視・ネガティブURL対策・コンテンツ発信管理ツール",
 };
 

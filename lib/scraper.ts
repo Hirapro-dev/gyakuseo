@@ -20,7 +20,7 @@ export async function scrapePageContent(
     const response = await fetch(url, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (compatible; RankGuard/1.0; +https://rankguard.app)",
+          "Mozilla/5.0 (compatible; nodeSEO/1.0; +https://nodeseo.app)",
         Accept: "text/html,application/xhtml+xml",
       },
       signal: AbortSignal.timeout(10000), // 10秒タイムアウト

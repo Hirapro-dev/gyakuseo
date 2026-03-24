@@ -65,7 +65,7 @@ export function Sidebar() {
       {/* ロゴ */}
       <div className="px-6 py-5 border-b border-navy-700">
         <Link href="/" className="text-xl font-bold text-accent-500" onClick={() => setMobileOpen(false)}>
-          RankGuard
+          nodeSEO
         </Link>
         <p className="text-xs text-gray-500 mt-0.5">逆SEO対策管理ツール</p>
       </div>
@@ -138,7 +138,7 @@ export function Sidebar() {
       {/* モバイル用ハンバーガーボタン */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-navy-900 border-b border-navy-700 px-4 h-14 flex items-center justify-between">
         <Link href="/" className="text-lg font-bold text-accent-500">
-          RankGuard
+          nodeSEO
         </Link>
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
